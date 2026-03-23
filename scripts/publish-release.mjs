@@ -18,7 +18,7 @@ function buildReleaseNotes(plan, inventories) {
     'Automated Portable Version release.',
     '',
     `- Portable release tag: ${plan.release.tag}`,
-    `- Desktop source: ${plan.upstream.desktop.repository}@${plan.upstream.desktop.tag}`,
+    `- Desktop release: ${plan.upstream.desktop.repository}@${plan.upstream.desktop.tag}`,
     `- Service source: ${plan.upstream.service.repository}@${plan.upstream.service.tag}`,
     `- Trigger: ${plan.trigger.type}`,
     `- Platforms: ${platformList}`,

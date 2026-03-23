@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { extractArchive } from './lib/archive.mjs';
 import { downloadReleaseAsset } from './lib/github.mjs';
 import {
+  cleanDir,
   copyDir,
   ensureDir,
   findFirstMatchingDirectory,
@@ -78,8 +79,7 @@ async function main() {
   const token = values.token ?? process.env.PORTABLE_VERSION_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   const downloadPath = path.join(workspaceManifest.downloadDirectory, asset.name);
   const extractionPath = path.join(workspaceManifest.extractDirectory, values.platform);
-  const portableRoot = path.join(workspaceManifest.desktopWorkspace, 'resources', 'portable-fixed');
-  const stagedCurrentPath = path.join(portableRoot, 'current');
+  const stagedCurrentPath = path.join(workspaceManifest.portableFixedRoot, 'current');
 
   await ensureDir(workspaceManifest.downloadDirectory);
   await ensureDir(extractionPath);
@@ -92,7 +92,8 @@ async function main() {
   }
 
   await validatePayloadRoot(runtimeRoot);
-  await ensureDir(portableRoot);
+  await ensureDir(workspaceManifest.portableFixedRoot);
+  await cleanDir(stagedCurrentPath);
   await copyDir(runtimeRoot, stagedCurrentPath);
 
   const validationReportPath = path.join(workspacePath, `payload-validation-${values.platform}.json`);
@@ -102,6 +103,7 @@ async function main() {
     downloadPath,
     extractionPath,
     runtimeRoot,
+    portableFixedRoot: workspaceManifest.portableFixedRoot,
     stagedCurrentPath,
     requiredPaths: [
       'manifest.json',

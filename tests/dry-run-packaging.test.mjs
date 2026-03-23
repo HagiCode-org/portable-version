@@ -14,10 +14,17 @@ function fixturePath(...segments) {
   return path.join(repoRoot, 'tests', 'fixtures', ...segments);
 }
 
+async function createFixtureArchive(sourceDirectory, archivePath) {
+  await runCommand('zip', ['-qr', archivePath, '.'], { cwd: sourceDirectory });
+}
+
 test('dry-run packaging stages payload and emits inventory metadata', async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'portable-version-dry-run-'));
   const planPath = path.join(tempRoot, 'build-plan.json');
   const workspacePath = path.join(tempRoot, 'workspace');
+  const desktopArchivePath = path.join(tempRoot, 'hagicode-desktop-0.2.0.zip');
+
+  await createFixtureArchive(fixturePath('desktop-fixture'), desktopArchivePath);
 
   await writeJson(planPath, {
     repositories: {
@@ -27,7 +34,15 @@ test('dry-run packaging stages payload and emits inventory metadata', async () =
     },
     platforms: ['linux-x64'],
     upstream: {
-      desktop: { tag: 'v0.2.0' },
+      desktop: {
+        tag: 'v0.2.0',
+        assetsByPlatform: {
+          'linux-x64': {
+            name: 'hagicode-desktop-0.2.0.zip',
+            downloadUrl: `file://${desktopArchivePath}`
+          }
+        }
+      },
       service: {
         tag: 'v0.1.0-beta.33',
         assetsByPlatform: {
@@ -54,8 +69,8 @@ test('dry-run packaging stages payload and emits inventory metadata', async () =
     'linux-x64',
     '--workspace',
     workspacePath,
-    '--desktop-source',
-    fixturePath('desktop-fixture')
+    '--desktop-asset-source',
+    desktopArchivePath
   ]);
 
   await runCommand('node', [

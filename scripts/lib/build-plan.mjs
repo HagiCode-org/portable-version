@@ -2,6 +2,7 @@ import { findReleaseByTag, getLatestEligibleRelease, getReleaseByTag } from './g
 import {
   createPlatformMatrix,
   derivePortableReleaseTag,
+  matchDesktopAssetForPlatform,
   matchServiceAssetForPlatform,
   normalizePlatforms,
   stripGitRef
@@ -97,6 +98,22 @@ export function mapServiceAssetsByPlatform(serviceRelease, platforms) {
   return assetsByPlatform;
 }
 
+export function mapDesktopAssetsByPlatform(desktopRelease, platforms) {
+  const assetsByPlatform = {};
+  for (const platformId of platforms) {
+    const asset = matchDesktopAssetForPlatform(desktopRelease.assets ?? [], platformId);
+    assetsByPlatform[platformId] = {
+      id: asset.id,
+      name: asset.name,
+      size: asset.size,
+      contentType: asset.content_type,
+      downloadUrl: asset.browser_download_url,
+      apiUrl: asset.url
+    };
+  }
+  return assetsByPlatform;
+}
+
 export async function buildPlan({
   eventName,
   eventPayload,
@@ -125,6 +142,7 @@ export async function buildPlan({
   const resolvedDesktopTag = stripGitRef(desktopRelease.tag_name);
   const resolvedServiceTag = stripGitRef(serviceRelease.tag_name);
   const releaseTag = derivePortableReleaseTag(resolvedDesktopTag, resolvedServiceTag);
+  const desktopAssetsByPlatform = mapDesktopAssetsByPlatform(desktopRelease, trigger.selectedPlatforms);
   const assetsByPlatform = mapServiceAssetsByPlatform(serviceRelease, trigger.selectedPlatforms);
   const existingPortableRelease = await findReleaseByTag(repositories.portable, releaseTag, token);
   const releaseExists = Boolean(existingPortableRelease);
@@ -150,7 +168,8 @@ export async function buildPlan({
         name: desktopRelease.name,
         publishedAt: desktopRelease.published_at,
         url: desktopRelease.html_url,
-        releaseId: desktopRelease.id
+        releaseId: desktopRelease.id,
+        assetsByPlatform: desktopAssetsByPlatform
       },
       service: {
         repository: repositories.service,

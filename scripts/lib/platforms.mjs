@@ -5,29 +5,31 @@ const PLATFORM_MAP = {
     id: 'linux-x64',
     runtimeKey: 'linux-x64-nort',
     runner: 'ubuntu-latest',
-    npmScript: 'build:linux',
-    artifactExtensions: ['.AppImage', '.deb', '.rpm', '.snap', '.zip', '.tar.gz']
+    desktopAssetPatterns: [/^hagicode-desktop-[^-]+\.[^.]+\.zip$/i, /^hagicode-desktop-.*\.zip$/i],
+    portableFixedSegments: ['resources', 'extra', 'portable-fixed']
   },
   'win-x64': {
     id: 'win-x64',
     runtimeKey: 'win-x64-nort',
     runner: 'windows-latest',
-    npmScript: 'build:win',
-    artifactExtensions: ['.exe', '.msi', '.appx', '.msix', '.zip']
+    desktopAssetPatterns: [/^hagicode\.desktop\..*-unpacked\.zip$/i],
+    portableFixedSegments: ['resources', 'extra', 'portable-fixed']
   },
   'osx-x64': {
     id: 'osx-x64',
     runtimeKey: 'osx-x64-nort',
     runner: 'macos-latest',
-    npmScript: 'build:mac:x64',
-    artifactExtensions: ['.dmg', '.zip', '.pkg']
+    desktopAssetPatterns: [/^hagicode\.desktop-.*-mac\.zip$/i],
+    appBundleName: 'Hagicode Desktop.app',
+    portableFixedSegments: ['Contents', 'Resources', 'extra', 'portable-fixed']
   },
   'osx-arm64': {
     id: 'osx-arm64',
     runtimeKey: 'osx-arm64-nort',
     runner: 'macos-latest',
-    npmScript: 'build:mac:arm64',
-    artifactExtensions: ['.dmg', '.zip', '.pkg']
+    desktopAssetPatterns: [/^hagicode\.desktop-.*-arm64-mac\.zip$/i],
+    appBundleName: 'Hagicode Desktop.app',
+    portableFixedSegments: ['Contents', 'Resources', 'extra', 'portable-fixed']
   }
 };
 
@@ -99,11 +101,25 @@ export function createPlatformMatrix(platforms) {
       return {
         platform: platform.id,
         runner: platform.runner,
-        runtimeKey: platform.runtimeKey,
-        npmScript: platform.npmScript
+        runtimeKey: platform.runtimeKey
       };
     })
   };
+}
+
+export function matchDesktopAssetForPlatform(assets, platformId) {
+  const platform = getPlatformConfig(platformId);
+  const candidates = assets.filter((asset) =>
+    platform.desktopAssetPatterns.some((pattern) => pattern.test(asset.name))
+  );
+
+  if (candidates.length === 0) {
+    throw new Error(
+      `Missing Desktop release asset for ${platformId}. Expected one of: ${platform.desktopAssetPatterns.map((pattern) => pattern.source).join(', ')}`
+    );
+  }
+
+  return candidates.sort((left, right) => left.name.localeCompare(right.name))[0];
 }
 
 export function matchServiceAssetForPlatform(assets, platformId) {
