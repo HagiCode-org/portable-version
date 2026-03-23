@@ -42,7 +42,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEFAULT_PLATFORMS: linux-x64
+  DEFAULT_PLATFORMS: linux-x64,win-x64,osx-x64,osx-arm64
   PORTABLE_VERSION_GITHUB_TOKEN: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
 
 jobs:
