@@ -56,10 +56,10 @@ jobs:
       dry_run: ${{ steps.resolve.outputs.dry_run }}
     steps:
       - name: Checkout portable-version
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
@@ -78,7 +78,7 @@ jobs:
             --default-platforms "$DEFAULT_PLATFORMS"
 
       - name: Upload build plan artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-plan
           path: ${{ runner.temp }}/build-plan.json
@@ -94,15 +94,15 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout portable-version
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download build plan artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: build-plan
           path: ${{ runner.temp }}/build-plan
@@ -141,7 +141,7 @@ jobs:
             --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
 
       - name: Upload packaged platform artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: portable-package-${{ matrix.platform }}
           path: |
@@ -160,21 +160,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout portable-version
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download build plan artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: build-plan
           path: ${{ runner.temp }}/build-plan
 
       - name: Download packaged artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: portable-package-*
           merge-multiple: true
@@ -192,7 +192,7 @@ jobs:
             --output-dir "$RUNNER_TEMP/release-metadata"
 
       - name: Upload publication metadata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-metadata-${{ needs.resolve.outputs.release_tag }}
           path: ${{ runner.temp }}/release-metadata
