@@ -42,7 +42,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEFAULT_PLATFORMS: linux-x64
+  DEFAULT_PLATFORMS: linux-x64,win-x64,osx-x64,osx-arm64
   PORTABLE_VERSION_GITHUB_TOKEN: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
 
 jobs:
@@ -62,6 +62,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '22'
+          package-manager-cache: false
 
       - name: Resolve normalized build plan
         id: resolve
@@ -100,6 +101,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '22'
+          package-manager-cache: false
 
       - name: Download build plan artifact
         uses: actions/download-artifact@v8
@@ -166,6 +168,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '22'
+          package-manager-cache: false
 
       - name: Download build plan artifact
         uses: actions/download-artifact@v8

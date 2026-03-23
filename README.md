@@ -41,7 +41,7 @@ Workflow permissions are set to:
 
 The automation currently assumes:
 
-- automatic scheduled builds default to `linux-x64` to stay safe for unattended CI while still producing a first-class portable package.
+- automatic scheduled builds default to the full platform matrix: `linux-x64`, `win-x64`, `osx-x64`, and `osx-arm64`.
 - Desktop release assets are consumed directly instead of rebuilding from source. Current archive patterns are `hagicode-desktop-<version>.zip` for Linux, `Hagicode.Desktop.<version>-unpacked.zip` for Windows, and the published macOS zip archives for macOS targets.
 - service release assets follow the framework-dependent naming contract used by HagiCode releases, for example `hagicode-0.1.0-beta.33-linux-x64-nort.zip`.
 - the selected service asset extracts to a structure that contains `manifest.json`, `config/`, `lib/PCode.Web.dll`, `lib/PCode.Web.runtimeconfig.json`, and `lib/PCode.Web.deps.json`.
@@ -77,7 +77,7 @@ Use these recovery paths when a workflow run fails or must be replayed:
 Each successful build publishes:
 
 - one deterministic Portable Version tag in the `pv-release-<hash>` namespace, so the tag stays Portable Version specific instead of exposing Desktop/Service versions directly
-- repacked Desktop artifacts copied to deterministic asset names
+- repacked Desktop artifacts copied to deterministic asset names such as `hagicode-portable-linux-x64.zip`
 - the normalized build manifest
 - merged artifact inventory metadata
 - merged SHA-256 checksums

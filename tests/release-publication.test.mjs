@@ -15,7 +15,7 @@ test('publish-release emits a dry-run publication report', async () => {
   const planPath = path.join(tempRoot, 'build-plan.json');
   const artifactsDir = path.join(tempRoot, 'artifacts');
   const outputDir = path.join(tempRoot, 'release-metadata');
-  const assetPath = path.join(artifactsDir, 'portable-version-example-linux-x64.zip');
+  const assetPath = path.join(artifactsDir, 'hagicode-portable-linux-x64.zip');
 
   await mkdir(artifactsDir, { recursive: true });
 
@@ -38,14 +38,14 @@ test('publish-release emits a dry-run publication report', async () => {
     platform: 'linux-x64',
     artifacts: [
       {
-        fileName: 'portable-version-example-linux-x64.zip',
-        outputPath: '/tmp/non-existent-runner-path/portable-version-example-linux-x64.zip',
+        fileName: 'hagicode-portable-linux-x64.zip',
+        outputPath: '/tmp/non-existent-runner-path/hagicode-portable-linux-x64.zip',
         sha256: 'abc123',
         sizeBytes: 12
       }
     ]
   });
-  await writeFile(path.join(artifactsDir, 'artifact-checksums-linux-x64.txt'), 'abc123  portable-version-example-linux-x64.zip\n', 'utf8');
+  await writeFile(path.join(artifactsDir, 'artifact-checksums-linux-x64.txt'), 'abc123  hagicode-portable-linux-x64.zip\n', 'utf8');
 
   await runCommand('node', [
     path.join(repoRoot, 'scripts', 'publish-release.mjs'),
