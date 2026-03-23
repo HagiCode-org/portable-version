@@ -39,7 +39,7 @@ test('publish-release emits a dry-run publication report', async () => {
     artifacts: [
       {
         fileName: 'portable-version-example-linux-x64.zip',
-        outputPath: assetPath,
+        outputPath: '/tmp/non-existent-runner-path/portable-version-example-linux-x64.zip',
         sha256: 'abc123',
         sizeBytes: 12
       }
