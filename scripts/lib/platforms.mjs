@@ -19,7 +19,7 @@ const PLATFORM_MAP = {
     id: 'osx-x64',
     runtimeKey: 'osx-x64-nort',
     runner: 'macos-latest',
-    desktopAssetPatterns: [/^hagicode\.desktop-.*-mac\.zip$/i],
+    desktopAssetPatterns: [/^hagicode\.desktop-(?!.*-arm64-mac\.zip$).*-mac\.zip$/i],
     appBundleName: 'Hagicode Desktop.app',
     portableFixedSegments: ['Contents', 'Resources', 'extra', 'portable-fixed']
   },

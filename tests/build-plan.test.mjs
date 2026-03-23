@@ -63,14 +63,18 @@ test('mapDesktopAssetsByPlatform matches published Desktop archives', () => {
     {
       assets: [
         { id: 1, name: 'hagicode-desktop-0.1.32.zip', browser_download_url: 'https://example.test/linux.zip' },
-        { id: 2, name: 'Hagicode.Desktop.0.1.32-unpacked.zip', browser_download_url: 'https://example.test/win.zip' }
+        { id: 2, name: 'Hagicode.Desktop.0.1.32-unpacked.zip', browser_download_url: 'https://example.test/win.zip' },
+        { id: 3, name: 'Hagicode.Desktop-0.1.32-mac.zip', browser_download_url: 'https://example.test/osx-x64.zip' },
+        { id: 4, name: 'Hagicode.Desktop-0.1.32-arm64-mac.zip', browser_download_url: 'https://example.test/osx-arm64.zip' }
       ]
     },
-    ['linux-x64', 'win-x64']
+    ['linux-x64', 'win-x64', 'osx-x64', 'osx-arm64']
   );
 
   assert.equal(mapped['linux-x64'].name, 'hagicode-desktop-0.1.32.zip');
   assert.equal(mapped['win-x64'].name, 'Hagicode.Desktop.0.1.32-unpacked.zip');
+  assert.equal(mapped['osx-x64'].name, 'Hagicode.Desktop-0.1.32-mac.zip');
+  assert.equal(mapped['osx-arm64'].name, 'Hagicode.Desktop-0.1.32-arm64-mac.zip');
 });
 
 test('derivePortableReleaseTag creates an independent Portable Version tag namespace', () => {
