@@ -3,7 +3,7 @@ import path from 'node:path';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { runCommand } from './lib/command.mjs';
-import { ensureDir, readJson, writeJson } from './lib/fs-utils.mjs';
+import { ensureDir, pathExists, readJson, writeJson } from './lib/fs-utils.mjs';
 import { annotateError, appendSummary } from './lib/summary.mjs';
 
 function getGhCommand() {
@@ -54,6 +54,24 @@ async function uploadAssets(plan, filePaths) {
   await runCommand(gh, ['release', 'upload', plan.release.tag, ...filePaths, '--repo', plan.release.repository, '--clobber']);
 }
 
+async function resolveArtifactUploadPath(artifactsDir, artifact) {
+  const candidates = [
+    artifact.outputPath,
+    path.join(artifactsDir, artifact.fileName),
+    path.join(artifactsDir, 'release-assets', artifact.fileName)
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `Unable to find uploaded artifact ${artifact.fileName}. Checked: ${candidates.join(', ')}`
+  );
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -101,8 +119,11 @@ async function main() {
   }
   await writeFile(mergedChecksumsPath, `${checksumContents.filter(Boolean).join('\n')}\n`, 'utf8');
 
+  const releaseAssetFiles = await Promise.all(
+    mergedInventory.artifacts.map((artifact) => resolveArtifactUploadPath(artifactsDir, artifact))
+  );
   const assetFiles = [
-    ...mergedInventory.artifacts.map((artifact) => artifact.outputPath),
+    ...releaseAssetFiles,
     buildManifestPath,
     mergedInventoryPath,
     mergedChecksumsPath
