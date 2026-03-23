@@ -27,8 +27,8 @@ test('publish-release emits a dry-run publication report', async () => {
     },
     release: {
       repository: 'HagiCode-org/portable-version',
-      tag: 'pv-desktop-v0.2.0__server-0.1.0-beta.33',
-      name: 'Portable Version v0.2.0 + v0.1.0-beta.33'
+      tag: 'pv-release-d680cc63b74a',
+      name: 'Portable Version pv-release-d680cc63b74a'
     },
     build: { dryRun: true }
   });
@@ -58,7 +58,7 @@ test('publish-release emits a dry-run publication report', async () => {
     '--force-dry-run'
   ]);
 
-  const report = await readJson(path.join(outputDir, 'pv-desktop-v0.2.0__server-0.1.0-beta.33.publish-dry-run.json'));
-  assert.equal(report.releaseTag, 'pv-desktop-v0.2.0__server-0.1.0-beta.33');
+  const report = await readJson(path.join(outputDir, 'pv-release-d680cc63b74a.publish-dry-run.json'));
+  assert.equal(report.releaseTag, 'pv-release-d680cc63b74a');
   assert.ok(report.assetFiles.some((filePath) => filePath.endsWith('.build-manifest.json')));
 });

@@ -165,7 +165,7 @@ export async function buildPlan({
     release: {
       repository: repositories.portable,
       tag: releaseTag,
-      name: `Portable Version ${resolvedDesktopTag} + ${resolvedServiceTag}`,
+      name: `Portable Version ${releaseTag}`,
       exists: releaseExists,
       url: existingPortableRelease?.html_url ?? null,
       notesTitle: `Portable Version ${releaseTag}`

@@ -75,7 +75,7 @@ Use these recovery paths when a workflow run fails or must be replayed:
 
 Each successful build publishes:
 
-- one deterministic GitHub Release tag derived from the Desktop and service version pair
+- one deterministic Portable Version tag in the `pv-release-<hash>` namespace, so the tag stays Portable Version specific instead of exposing Desktop/Service versions directly
 - packaged artifacts copied to deterministic asset names
 - the normalized build manifest
 - merged artifact inventory metadata

@@ -54,9 +54,9 @@ test('mapServiceAssetsByPlatform matches framework-dependent runtime assets', ()
   assert.equal(mapped['win-x64'].name, 'hagicode-0.1.0-beta.33-win-x64-nort.zip');
 });
 
-test('derivePortableReleaseTag preserves Desktop v-prefix and strips service v-prefix', () => {
+test('derivePortableReleaseTag creates an independent Portable Version tag namespace', () => {
   assert.equal(
     derivePortableReleaseTag('v0.1.31', 'v0.1.0-beta.33'),
-    'pv-desktop-v0.1.31__server-0.1.0-beta.33'
+    'pv-release-380d772cc976'
   );
 });

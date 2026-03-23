@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 const PLATFORM_MAP = {
   'linux-x64': {
     id: 'linux-x64',
@@ -79,7 +81,11 @@ export function normalizePlatforms(value, fallback = DEFAULT_PLATFORMS) {
 export function derivePortableReleaseTag(desktopTag, serviceTag) {
   const normalizedDesktopTag = stripGitRef(desktopTag);
   const normalizedServiceTag = stripGitRef(serviceTag).replace(/^v/i, '');
-  return `pv-desktop-${normalizedDesktopTag}__server-${normalizedServiceTag}`;
+  const fingerprint = createHash('sha256')
+    .update(`portable-version|desktop:${normalizedDesktopTag}|service:${normalizedServiceTag}`)
+    .digest('hex')
+    .slice(0, 12);
+  return `pv-release-${fingerprint}`;
 }
 
 export function stripGitRef(value) {

@@ -39,7 +39,7 @@ test('dry-run packaging stages payload and emits inventory metadata', async () =
       }
     },
     release: {
-      tag: 'pv-desktop-v0.2.0__server-0.1.0-beta.33'
+      tag: 'pv-release-d680cc63b74a'
     },
     build: {
       dryRun: true
@@ -82,5 +82,5 @@ test('dry-run packaging stages payload and emits inventory metadata', async () =
   const inventory = await readJson(path.join(workspacePath, 'artifact-inventory-linux-x64.json'));
   assert.equal(inventory.artifacts.length, 1);
   assert.equal(inventory.platform, 'linux-x64');
-  assert.match(inventory.artifacts[0].fileName, /portable-version-pv-desktop-v0.2.0__server-0.1.0-beta.33-linux-x64/);
+  assert.match(inventory.artifacts[0].fileName, /portable-version-pv-release-d680cc63b74a-linux-x64/);
 });
