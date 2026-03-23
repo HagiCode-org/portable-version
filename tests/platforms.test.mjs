@@ -18,14 +18,12 @@ test('createPlatformMatrix returns runner metadata', () => {
       {
         platform: 'linux-x64',
         runner: 'ubuntu-latest',
-        runtimeKey: 'linux-x64-nort',
-        npmScript: 'build:linux'
+        runtimeKey: 'linux-x64-nort'
       },
       {
         platform: 'win-x64',
         runner: 'windows-latest',
-        runtimeKey: 'win-x64-nort',
-        npmScript: 'build:win'
+        runtimeKey: 'win-x64-nort'
       }
     ]
   });

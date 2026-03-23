@@ -107,7 +107,7 @@ jobs:
           name: build-plan
           path: ${{ runner.temp }}/build-plan
 
-      - name: Prepare packaging workspace
+      - name: Prepare Desktop archive workspace
         working-directory: .
         shell: bash
         env:
@@ -118,7 +118,7 @@ jobs:
             --platform "${{ matrix.platform }}" \
             --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
 
-      - name: Download and stage service payload
+      - name: Download and inject service payload
         working-directory: .
         shell: bash
         env:
@@ -129,7 +129,7 @@ jobs:
             --platform "${{ matrix.platform }}" \
             --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
 
-      - name: Package portable Desktop outputs
+      - name: Repack portable Desktop archive
         working-directory: .
         shell: bash
         env:

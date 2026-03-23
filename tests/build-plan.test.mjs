@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTriggerInputs, mapServiceAssetsByPlatform } from '../scripts/lib/build-plan.mjs';
+import {
+  mapDesktopAssetsByPlatform,
+  mapServiceAssetsByPlatform,
+  normalizeTriggerInputs
+} from '../scripts/lib/build-plan.mjs';
 import { derivePortableReleaseTag } from '../scripts/lib/platforms.mjs';
 
 const defaultPlatforms = ['linux-x64'];
@@ -52,6 +56,21 @@ test('mapServiceAssetsByPlatform matches framework-dependent runtime assets', ()
 
   assert.equal(mapped['linux-x64'].name, 'hagicode-0.1.0-beta.33-linux-x64-nort.zip');
   assert.equal(mapped['win-x64'].name, 'hagicode-0.1.0-beta.33-win-x64-nort.zip');
+});
+
+test('mapDesktopAssetsByPlatform matches published Desktop archives', () => {
+  const mapped = mapDesktopAssetsByPlatform(
+    {
+      assets: [
+        { id: 1, name: 'hagicode-desktop-0.1.32.zip', browser_download_url: 'https://example.test/linux.zip' },
+        { id: 2, name: 'Hagicode.Desktop.0.1.32-unpacked.zip', browser_download_url: 'https://example.test/win.zip' }
+      ]
+    },
+    ['linux-x64', 'win-x64']
+  );
+
+  assert.equal(mapped['linux-x64'].name, 'hagicode-desktop-0.1.32.zip');
+  assert.equal(mapped['win-x64'].name, 'Hagicode.Desktop.0.1.32-unpacked.zip');
 });
 
 test('derivePortableReleaseTag creates an independent Portable Version tag namespace', () => {
