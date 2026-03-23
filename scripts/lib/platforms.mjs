@@ -147,6 +147,6 @@ export function toSafeFileComponent(value) {
   return sanitized || 'artifact';
 }
 
-export function buildDeterministicAssetName(releaseTag, platformId, sourceName) {
-  return `portable-version-${toSafeFileComponent(releaseTag)}-${platformId}-${toSafeFileComponent(sourceName)}`;
+export function buildDeterministicAssetName(_releaseTag, platformId, _sourceName) {
+  return `hagicode-portable-${platformId}.zip`;
 }

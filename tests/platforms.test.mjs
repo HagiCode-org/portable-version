@@ -32,6 +32,6 @@ test('createPlatformMatrix returns runner metadata', () => {
 test('buildDeterministicAssetName produces stable publish-friendly names', () => {
   assert.equal(
     buildDeterministicAssetName('pv-release-380d772cc976', 'linux-x64', 'HagiCode Desktop 0.1.0.AppImage'),
-    'portable-version-pv-release-380d772cc976-linux-x64-HagiCode-Desktop-0.1.0.AppImage'
+    'hagicode-portable-linux-x64.zip'
   );
 });
