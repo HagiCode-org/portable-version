@@ -65,7 +65,7 @@ jobs:
 
       - name: Resolve normalized build plan
         id: resolve
-        working-directory: repos/portable-version
+        working-directory: .
         env:
           GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
         run: |
@@ -107,7 +107,7 @@ jobs:
           path: ${{ runner.temp }}/build-plan
 
       - name: Prepare packaging workspace
-        working-directory: repos/portable-version
+        working-directory: .
         env:
           GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
         run: |
@@ -117,7 +117,7 @@ jobs:
             --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
 
       - name: Download and stage service payload
-        working-directory: repos/portable-version
+        working-directory: .
         env:
           GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
         run: |
@@ -127,7 +127,7 @@ jobs:
             --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
 
       - name: Package portable Desktop outputs
-        working-directory: repos/portable-version
+        working-directory: .
         env:
           GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
         run: |
@@ -177,7 +177,7 @@ jobs:
           path: ${{ runner.temp }}/publish-input
 
       - name: Publish GitHub Release or emit dry-run report
-        working-directory: repos/portable-version
+        working-directory: .
         env:
           GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
         run: |

@@ -4,7 +4,7 @@ This repository automates Portable Version builds for HagiCode Desktop by resolv
 
 ## Trigger modes
 
-The main workflow is `repos/portable-version/.github/workflows/portable-version-build.yml`.
+The main workflow is `.github/workflows/portable-version-build.yml`.
 
 It supports three non-interactive entrypoints:
 
@@ -52,7 +52,6 @@ The automation currently assumes:
 Run the helper tests from the repository root for `portable-version`:
 
 ```bash
-cd repos/portable-version
 npm test
 npm run verify:dry-run
 ```
