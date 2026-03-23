@@ -1,0 +1,194 @@
+name: portable-version-build
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      desktop_tag:
+        description: 'Optional Desktop release tag override.'
+        required: false
+        type: string
+      service_tag:
+        description: 'Optional service release tag override.'
+        required: false
+        type: string
+      platforms:
+        description: 'Comma-separated platforms (linux-x64, win-x64, osx-x64, osx-arm64, or all).'
+        required: false
+        default: 'linux-x64'
+        type: string
+      force_rebuild:
+        description: 'Continue even when the derived Portable Version release already exists.'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: 'Resolve, stage, and package without publishing a GitHub Release.'
+        required: false
+        default: false
+        type: boolean
+  repository_dispatch:
+    types:
+      - portable-version-build
+      - portable-version-upstream-release
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: portable-version-${{ github.event_name }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  DEFAULT_PLATFORMS: linux-x64
+  PORTABLE_VERSION_GITHUB_TOKEN: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
+
+jobs:
+  resolve:
+    name: Resolve build plan
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.resolve.outputs.should_build }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      platform_matrix: ${{ steps.resolve.outputs.platform_matrix }}
+      dry_run: ${{ steps.resolve.outputs.dry_run }}
+    steps:
+      - name: Checkout portable-version
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve normalized build plan
+        id: resolve
+        working-directory: repos/portable-version
+        env:
+          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+        run: |
+          cp "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/portable-version-event.json"
+          node scripts/resolve-build-plan.mjs \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --event-path "$RUNNER_TEMP/portable-version-event.json" \
+            --output "$RUNNER_TEMP/build-plan.json" \
+            --default-platforms "$DEFAULT_PLATFORMS"
+
+      - name: Upload build plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-plan
+          path: ${{ runner.temp }}/build-plan.json
+          if-no-files-found: error
+
+  package:
+    name: Package ${{ matrix.platform }}
+    needs: resolve
+    if: needs.resolve.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.resolve.outputs.platform_matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout portable-version
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download build plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-plan
+          path: ${{ runner.temp }}/build-plan
+
+      - name: Prepare packaging workspace
+        working-directory: repos/portable-version
+        env:
+          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+        run: |
+          node scripts/prepare-packaging-workspace.mjs \
+            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
+            --platform "${{ matrix.platform }}" \
+            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
+
+      - name: Download and stage service payload
+        working-directory: repos/portable-version
+        env:
+          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+        run: |
+          node scripts/stage-portable-payload.mjs \
+            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
+            --platform "${{ matrix.platform }}" \
+            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
+
+      - name: Package portable Desktop outputs
+        working-directory: repos/portable-version
+        env:
+          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+        run: |
+          node scripts/package-desktop-portable.mjs \
+            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
+            --platform "${{ matrix.platform }}" \
+            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
+
+      - name: Upload packaged platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-package-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/artifact-inventory-${{ matrix.platform }}.json
+            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/artifact-checksums-${{ matrix.platform }}.txt
+            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/payload-validation-${{ matrix.platform }}.json
+            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/release-assets
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs:
+      - resolve
+      - package
+    if: needs.resolve.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout portable-version
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download build plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-plan
+          path: ${{ runner.temp }}/build-plan
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: portable-package-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/publish-input
+
+      - name: Publish GitHub Release or emit dry-run report
+        working-directory: repos/portable-version
+        env:
+          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+        run: |
+          node scripts/publish-release.mjs \
+            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
+            --artifacts-dir "$RUNNER_TEMP/publish-input" \
+            --output-dir "$RUNNER_TEMP/release-metadata"
+
+      - name: Upload publication metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata-${{ needs.resolve.outputs.release_tag }}
+          path: ${{ runner.temp }}/release-metadata
+          if-no-files-found: error
