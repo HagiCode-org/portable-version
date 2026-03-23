@@ -1,0 +1,39 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  buildDeterministicAssetName,
+  createPlatformMatrix,
+  normalizePlatforms
+} from '../scripts/lib/platforms.mjs';
+
+test('normalizePlatforms supports all shortcut and rejects unsupported values', () => {
+  assert.deepEqual(normalizePlatforms('all'), ['linux-x64', 'win-x64', 'osx-x64', 'osx-arm64']);
+  assert.throws(() => normalizePlatforms('linux-x64,plan9'), /Unsupported platform override/);
+});
+
+test('createPlatformMatrix returns runner metadata', () => {
+  const matrix = createPlatformMatrix(['linux-x64', 'win-x64']);
+  assert.deepEqual(matrix, {
+    include: [
+      {
+        platform: 'linux-x64',
+        runner: 'ubuntu-latest',
+        runtimeKey: 'linux-x64-nort',
+        npmScript: 'build:linux'
+      },
+      {
+        platform: 'win-x64',
+        runner: 'windows-latest',
+        runtimeKey: 'win-x64-nort',
+        npmScript: 'build:win'
+      }
+    ]
+  });
+});
+
+test('buildDeterministicAssetName produces stable publish-friendly names', () => {
+  assert.equal(
+    buildDeterministicAssetName('pv-desktop-v0.1.31__server-0.1.0-beta.33', 'linux-x64', 'HagiCode Desktop 0.1.0.AppImage'),
+    'portable-version-pv-desktop-v0.1.31__server-0.1.0-beta.33-linux-x64-HagiCode-Desktop-0.1.0.AppImage'
+  );
+});
