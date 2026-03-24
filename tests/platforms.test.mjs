@@ -3,8 +3,13 @@ import assert from 'node:assert/strict';
 import {
   buildDeterministicAssetName,
   createPlatformMatrix,
+  getPlatformConfig,
   normalizePlatforms
 } from '../scripts/lib/platforms.mjs';
+import {
+  getNodeExecutableRelativePath,
+  getNpmExecutableRelativePath
+} from '../scripts/lib/toolchain.mjs';
 
 test('normalizePlatforms supports all shortcut and rejects unsupported values', () => {
   assert.deepEqual(normalizePlatforms('all'), ['linux-x64', 'win-x64', 'osx-x64', 'osx-arm64']);
@@ -34,4 +39,13 @@ test('buildDeterministicAssetName produces stable publish-friendly names', () =>
     buildDeterministicAssetName('pv-release-380d772cc976', 'linux-x64', 'HagiCode Desktop 0.1.0.AppImage'),
     'hagicode-portable-linux-x64.zip'
   );
+});
+
+test('platform metadata exposes portable toolchain layout', () => {
+  assert.equal(getPlatformConfig('linux-x64').toolchain.primaryShimExtension, '');
+  assert.equal(getPlatformConfig('win-x64').toolchain.primaryShimExtension, '.cmd');
+  assert.equal(getNodeExecutableRelativePath('linux-x64'), 'node/bin/node');
+  assert.equal(getNpmExecutableRelativePath('linux-x64'), 'node/bin/npm');
+  assert.equal(getNodeExecutableRelativePath('win-x64'), 'node/node.exe');
+  assert.equal(getNpmExecutableRelativePath('win-x64'), 'node/npm.cmd');
 });

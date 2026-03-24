@@ -6,6 +6,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { runCommand } from '../scripts/lib/command.mjs';
 import { readJson, writeJson } from '../scripts/lib/fs-utils.mjs';
+import { createMockPortableToolchainConfig } from './helpers/portable-toolchain-fixture.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -23,6 +24,7 @@ test('dry-run packaging stages payload and emits inventory metadata', async () =
   const planPath = path.join(tempRoot, 'build-plan.json');
   const workspacePath = path.join(tempRoot, 'workspace');
   const desktopArchivePath = path.join(tempRoot, 'hagicode-desktop-0.2.0.zip');
+  const toolchainFixture = await createMockPortableToolchainConfig(tempRoot);
 
   await createFixtureArchive(fixturePath('desktop-fixture'), desktopArchivePath);
 
@@ -84,6 +86,28 @@ test('dry-run packaging stages payload and emits inventory metadata', async () =
   ]);
 
   await runCommand('node', [
+    path.join(repoRoot, 'scripts', 'stage-portable-toolchain.mjs'),
+    '--plan',
+    planPath,
+    '--platform',
+    'linux-x64',
+    '--workspace',
+    workspacePath,
+    '--toolchain-config',
+    toolchainFixture.configPath
+  ]);
+
+  await runCommand('node', [
+    path.join(repoRoot, 'scripts', 'verify-portable-toolchain.mjs'),
+    '--platform',
+    'linux-x64',
+    '--workspace',
+    workspacePath,
+    '--toolchain-config',
+    toolchainFixture.configPath
+  ]);
+
+  await runCommand('node', [
     path.join(repoRoot, 'scripts', 'package-desktop-portable.mjs'),
     '--plan',
     planPath,
@@ -95,7 +119,16 @@ test('dry-run packaging stages payload and emits inventory metadata', async () =
   ]);
 
   const inventory = await readJson(path.join(workspacePath, 'artifact-inventory-linux-x64.json'));
+  const toolchainReport = await readJson(path.join(workspacePath, 'toolchain-validation-linux-x64.json'));
   assert.equal(inventory.artifacts.length, 1);
   assert.equal(inventory.platform, 'linux-x64');
   assert.equal(inventory.artifacts[0].fileName, 'hagicode-portable-linux-x64.zip');
+  assert.equal(toolchainReport.validationPassed, true);
+  assert.match(inventory.toolchainValidationPath, /toolchain-validation-linux-x64\.json$/);
+
+  const packagedArchivePath = inventory.artifacts[0].outputPath;
+  const archiveListing = await runCommand('unzip', ['-Z1', packagedArchivePath], { stdio: 'pipe' });
+  assert.match(archiveListing.stdout, /resources\/extra\/portable-fixed\/toolchain\/toolchain-manifest\.json/);
+  assert.match(archiveListing.stdout, /resources\/extra\/portable-fixed\/toolchain\/bin\/openspec/);
+  assert.match(archiveListing.stdout, /resources\/extra\/portable-fixed\/toolchain\/env\/activate\.sh/);
 });
