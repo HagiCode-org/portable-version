@@ -2,6 +2,8 @@
 
 This repository automates Portable Version builds for HagiCode Desktop by resolving upstream Desktop and service releases, downloading the published Desktop archives, injecting the fixed portable payload, repacking the archive, and publishing a deterministic GitHub Release.
 
+Portable builds now also bundle a pinned Node.js runtime and a preinstalled OpenSpec CLI so the unpacked archive can run `node`, `openspec`, and `opsx` without depending on machine-wide installations.
+
 ## Trigger modes
 
 The main workflow is `.github/workflows/portable-version-build.yml`.
@@ -46,6 +48,8 @@ The automation currently assumes:
 - service release assets follow the framework-dependent naming contract used by HagiCode releases, for example `hagicode-0.1.0-beta.33-linux-x64-nort.zip`.
 - the selected service asset extracts to a structure that contains `manifest.json`, `config/`, `lib/PCode.Web.dll`, `lib/PCode.Web.runtimeconfig.json`, and `lib/PCode.Web.deps.json`.
 - the downloaded Desktop archive already contains `resources/extra/portable-fixed/` or `Contents/Resources/extra/portable-fixed/`, and the workflow injects the runtime into `current/` inside that directory.
+- the portable toolchain manifest is defined in `config/portable-toolchain.json`, which pins the Node.js distribution per platform and the bundled OpenSpec CLI package version.
+- the repacked archive stages the portable toolchain under `portable-fixed/toolchain/`, including `node/`, `npm-global/`, `bin/openspec`, `bin/opsx`, `env/activate.*`, and `toolchain-manifest.json`.
 - repacking the downloaded Desktop archive must preserve the original release layout so the resulting Portable Version still boots as a normal Desktop build.
 
 ## Local verification
@@ -59,6 +63,18 @@ npm run verify:dry-run
 
 The dry-run test uses fixture assets and validates Desktop archive download/extraction, service asset extraction, payload injection, archive repacking, and publish-ready inventory generation without creating a GitHub Release.
 
+The dry-run flow now also validates portable toolchain staging and verification:
+
+- `scripts/stage-portable-toolchain.mjs` downloads the pinned Node runtime into `portable-fixed/toolchain/node`, installs the pinned OpenSpec CLI into `portable-fixed/toolchain/npm-global`, and emits `portable-fixed/toolchain/toolchain-manifest.json`.
+- `scripts/verify-portable-toolchain.mjs` prepends the portable PATH and checks `node --version`, `openspec --version`, and `opsx status --help`.
+- each platform workspace emits `toolchain-validation-<platform>.json`, and the workflow uploads that report together with the repacked archive inventory and checksums.
+
+Inside the unpacked archive, portable command entrypoints live under:
+
+- `resources/extra/portable-fixed/toolchain/bin/openspec` and `opsx` on Linux/macOS
+- `resources/extra/portable-fixed/toolchain/bin/openspec.cmd` and `opsx.cmd` on Windows
+- `resources/extra/portable-fixed/toolchain/env/activate.*` helper scripts for session-scoped PATH injection
+
 ## Manual recovery steps
 
 Use these recovery paths when a workflow run fails or must be replayed:
@@ -70,6 +86,7 @@ Use these recovery paths when a workflow run fails or must be replayed:
    - `build-plan`
    - `portable-package-<platform>`
    - `release-metadata-<release-tag>`
+   - `toolchain-validation-<platform>.json`
 5. Review the workflow summary for the exact validation failure, missing platform asset, or publication command error.
 
 ## Derived release outputs
@@ -81,3 +98,4 @@ Each successful build publishes:
 - the normalized build manifest
 - merged artifact inventory metadata
 - merged SHA-256 checksums
+- one toolchain validation report per platform, proving the bundled `node`, `openspec`, and `opsx` commands executed successfully before publication
