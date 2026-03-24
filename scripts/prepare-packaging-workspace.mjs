@@ -13,6 +13,7 @@ import {
 } from './lib/fs-utils.mjs';
 import { annotateError, appendSummary } from './lib/summary.mjs';
 import { getPlatformConfig } from './lib/platforms.mjs';
+import { resolveToolchainRoots } from './lib/toolchain.mjs';
 
 async function resolveDesktopAppRoot(extractionRoot, platform) {
   if (!platform.appBundleName) {
@@ -81,6 +82,7 @@ async function main() {
   if (!(await pathExists(portableFixedRoot))) {
     throw new Error(`Desktop asset ${desktopAsset.name} does not contain ${portableFixedRoot}.`);
   }
+  const toolchainRoots = resolveToolchainRoots(portableFixedRoot);
 
   const workspaceManifest = {
     planPath,
@@ -95,6 +97,9 @@ async function main() {
     desktopTag: plan.upstream.desktop.tag,
     desktopAssetName: desktopAsset.name,
     desktopArchivePath,
+    toolchainRoot: toolchainRoots.toolchainRoot,
+    toolchainBinRoot: toolchainRoots.toolchainBinRoot,
+    toolchainManifestPath: toolchainRoots.toolchainManifestPath,
     dryRun: plan.build.dryRun
   };
   const workspaceManifestPath = path.join(workspacePath, 'workspace-manifest.json');

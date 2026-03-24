@@ -27,8 +27,25 @@ async function main() {
   const workspaceManifest = await readJson(path.join(workspacePath, 'workspace-manifest.json'));
   getPlatformConfig(values.platform);
   const stagedCurrentPath = path.join(workspaceManifest.portableFixedRoot, 'current');
+  const stagedToolchainPath = workspaceManifest.toolchainRoot ?? path.join(workspaceManifest.portableFixedRoot, 'toolchain');
+  const toolchainManifestPath =
+    workspaceManifest.toolchainManifestPath ?? path.join(stagedToolchainPath, 'toolchain-manifest.json');
+  const toolchainValidationPath = path.join(workspacePath, `toolchain-validation-${values.platform}.json`);
   if (!(await pathExists(stagedCurrentPath))) {
     throw new Error(`Portable payload is not staged at ${stagedCurrentPath}.`);
+  }
+  if (!(await pathExists(stagedToolchainPath))) {
+    throw new Error(`Portable toolchain is not staged at ${stagedToolchainPath}.`);
+  }
+  if (!(await pathExists(toolchainManifestPath))) {
+    throw new Error(`Portable toolchain manifest is missing at ${toolchainManifestPath}.`);
+  }
+  if (!(await pathExists(toolchainValidationPath))) {
+    throw new Error(`Portable toolchain validation report is missing at ${toolchainValidationPath}.`);
+  }
+  const toolchainValidation = await readJson(toolchainValidationPath);
+  if (!toolchainValidation.validationPassed) {
+    throw new Error(`Portable toolchain validation failed for ${values.platform}.`);
   }
 
   await ensureDir(workspaceManifest.outputDirectory);
@@ -54,6 +71,8 @@ async function main() {
     releaseTag: plan.release.tag,
     platform: values.platform,
     dryRun,
+    payloadValidationPath: path.join(workspacePath, `payload-validation-${values.platform}.json`),
+    toolchainValidationPath,
     artifacts: inventory
   });
   await writeChecksumFile(inventory, checksumsPath);
@@ -63,6 +82,7 @@ async function main() {
     `- Mode: ${dryRun ? 'dry-run' : 'publish-ready'}`,
     `- Inventory: ${inventoryPath}`,
     `- Checksums: ${checksumsPath}`,
+    `- Toolchain validation: ${toolchainValidationPath}`,
     `- Artifacts: ${inventory.map((entry) => entry.fileName).join(', ')}`
   ]);
 
