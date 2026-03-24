@@ -131,6 +131,25 @@ jobs:
             --platform "${{ matrix.platform }}" \
             --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
 
+      - name: Stage portable Node and OpenSpec toolchain
+        working-directory: .
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+        run: |
+          node scripts/stage-portable-toolchain.mjs \
+            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
+            --platform "${{ matrix.platform }}" \
+            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
+
+      - name: Verify portable toolchain
+        working-directory: .
+        shell: bash
+        run: |
+          node scripts/verify-portable-toolchain.mjs \
+            --platform "${{ matrix.platform }}" \
+            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
+
       - name: Repack portable Desktop archive
         working-directory: .
         shell: bash
@@ -150,6 +169,7 @@ jobs:
             ${{ runner.temp }}/portable-version-${{ matrix.platform }}/artifact-inventory-${{ matrix.platform }}.json
             ${{ runner.temp }}/portable-version-${{ matrix.platform }}/artifact-checksums-${{ matrix.platform }}.txt
             ${{ runner.temp }}/portable-version-${{ matrix.platform }}/payload-validation-${{ matrix.platform }}.json
+            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/toolchain-validation-${{ matrix.platform }}.json
             ${{ runner.temp }}/portable-version-${{ matrix.platform }}/release-assets
           if-no-files-found: error
 
