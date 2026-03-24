@@ -48,3 +48,45 @@ export async function runCommand(command, args, options = {}) {
     });
   });
 }
+
+export async function runCommandResult(command, args, options = {}) {
+  const {
+    cwd,
+    env,
+    input,
+    shell = false
+  } = options;
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      shell,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    if (input) {
+      child.stdin?.write(input);
+    }
+    child.stdin?.end();
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      resolve({
+        code: code ?? 1,
+        stdout,
+        stderr
+      });
+    });
+  });
+}

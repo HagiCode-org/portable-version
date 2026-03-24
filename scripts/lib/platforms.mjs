@@ -6,14 +6,32 @@ const PLATFORM_MAP = {
     runtimeKey: 'linux-x64-nort',
     runner: 'ubuntu-latest',
     desktopAssetPatterns: [/^hagicode-desktop-[^-]+\.[^.]+\.zip$/i, /^hagicode-desktop-.*\.zip$/i],
-    portableFixedSegments: ['resources', 'extra', 'portable-fixed']
+    portableFixedSegments: ['resources', 'extra', 'portable-fixed'],
+    toolchain: {
+      shell: 'posix',
+      nodeBinSegments: ['bin'],
+      nodeExecutableName: 'node',
+      npmExecutableName: 'npm',
+      npmGlobalBinSegments: ['bin'],
+      npmGlobalModulesSegments: ['lib', 'node_modules'],
+      primaryShimExtension: ''
+    }
   },
   'win-x64': {
     id: 'win-x64',
     runtimeKey: 'win-x64-nort',
     runner: 'windows-latest',
     desktopAssetPatterns: [/^hagicode\.desktop\..*-unpacked\.zip$/i],
-    portableFixedSegments: ['resources', 'extra', 'portable-fixed']
+    portableFixedSegments: ['resources', 'extra', 'portable-fixed'],
+    toolchain: {
+      shell: 'windows',
+      nodeBinSegments: [],
+      nodeExecutableName: 'node.exe',
+      npmExecutableName: 'npm.cmd',
+      npmGlobalBinSegments: [],
+      npmGlobalModulesSegments: ['node_modules'],
+      primaryShimExtension: '.cmd'
+    }
   },
   'osx-x64': {
     id: 'osx-x64',
@@ -21,7 +39,16 @@ const PLATFORM_MAP = {
     runner: 'macos-latest',
     desktopAssetPatterns: [/^hagicode\.desktop-(?!.*-arm64-mac\.zip$).*-mac\.zip$/i],
     appBundleName: 'Hagicode Desktop.app',
-    portableFixedSegments: ['Contents', 'Resources', 'extra', 'portable-fixed']
+    portableFixedSegments: ['Contents', 'Resources', 'extra', 'portable-fixed'],
+    toolchain: {
+      shell: 'posix',
+      nodeBinSegments: ['bin'],
+      nodeExecutableName: 'node',
+      npmExecutableName: 'npm',
+      npmGlobalBinSegments: ['bin'],
+      npmGlobalModulesSegments: ['lib', 'node_modules'],
+      primaryShimExtension: ''
+    }
   },
   'osx-arm64': {
     id: 'osx-arm64',
@@ -29,7 +56,16 @@ const PLATFORM_MAP = {
     runner: 'macos-latest',
     desktopAssetPatterns: [/^hagicode\.desktop-.*-arm64-mac\.zip$/i],
     appBundleName: 'Hagicode Desktop.app',
-    portableFixedSegments: ['Contents', 'Resources', 'extra', 'portable-fixed']
+    portableFixedSegments: ['Contents', 'Resources', 'extra', 'portable-fixed'],
+    toolchain: {
+      shell: 'posix',
+      nodeBinSegments: ['bin'],
+      nodeExecutableName: 'node',
+      npmExecutableName: 'npm',
+      npmGlobalBinSegments: ['bin'],
+      npmGlobalModulesSegments: ['lib', 'node_modules'],
+      primaryShimExtension: ''
+    }
   }
 };
 
