@@ -12,14 +12,16 @@ function getGhCommand() {
 
 function buildReleaseNotes(plan, inventories) {
   const platformList = inventories.map((inventory) => inventory.platform).join(', ');
+  const desktopSource = `${plan.upstream.desktop.manifestUrl}@${plan.upstream.desktop.version}`;
+  const serviceSource = `${plan.upstream.service.manifestUrl}@${plan.upstream.service.version}`;
   return [
     `# ${plan.release.name}`,
     '',
     'Automated Portable Version release.',
     '',
     `- Portable release tag: ${plan.release.tag}`,
-    `- Desktop release: ${plan.upstream.desktop.repository}@${plan.upstream.desktop.tag}`,
-    `- Service source: ${plan.upstream.service.repository}@${plan.upstream.service.tag}`,
+    `- Desktop source: ${desktopSource}`,
+    `- Service source: ${serviceSource}`,
     `- Trigger: ${plan.trigger.type}`,
     `- Platforms: ${platformList}`,
     `- Mode: ${plan.build.dryRun ? 'dry-run' : 'publish'}`
