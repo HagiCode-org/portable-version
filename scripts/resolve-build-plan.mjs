@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { parseAzureSasUrl, sanitizeUrlForLogs } from './lib/azure-blob.mjs';
 import { buildPlan } from './lib/build-plan.mjs';
 import { ensureDir, readJson, writeJson } from './lib/fs-utils.mjs';
+import { DEFAULT_INDEX_SOURCES } from './lib/index-source.mjs';
 import { DEFAULT_PLATFORMS } from './lib/platforms.mjs';
 import { appendSummary, annotateError } from './lib/summary.mjs';
 import { writeGithubOutputs } from './lib/workflow-output.mjs';
@@ -14,7 +16,11 @@ async function main() {
       'event-path': { type: 'string' },
       output: { type: 'string' },
       token: { type: 'string' },
-      'default-platforms': { type: 'string' }
+      'default-platforms': { type: 'string' },
+      'desktop-index-url': { type: 'string' },
+      'service-index-url': { type: 'string' },
+      'desktop-azure-sas-url': { type: 'string' },
+      'service-azure-sas-url': { type: 'string' }
     }
   });
 
@@ -22,9 +28,38 @@ async function main() {
   const eventPath = values['event-path'] ?? process.env.GITHUB_EVENT_PATH;
   const outputPath = path.resolve(values.output ?? 'build/build-plan.json');
   const token = values.token ?? process.env.PORTABLE_VERSION_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const desktopAzureSasUrl =
+    values['desktop-azure-sas-url'] ??
+    process.env.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL ??
+    process.env.DESKTOP_AZURE_BLOB_SAS_URL ??
+    process.env.PORTABLE_VERSION_AZURE_SAS_URL ??
+    process.env.AZURE_BLOB_SAS_URL ??
+    process.env.AZURE_SAS_URL;
+  const serviceAzureSasUrl =
+    values['service-azure-sas-url'] ??
+    process.env.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL ??
+    process.env.SERVICE_AZURE_BLOB_SAS_URL ??
+    process.env.PORTABLE_VERSION_AZURE_SAS_URL ??
+    process.env.AZURE_BLOB_SAS_URL ??
+    process.env.AZURE_SAS_URL;
   const defaultPlatforms = values['default-platforms']
     ? values['default-platforms'].split(',').map((item) => item.trim()).filter(Boolean)
     : DEFAULT_PLATFORMS;
+
+  if (!desktopAzureSasUrl || !serviceAzureSasUrl) {
+    throw new Error(
+      'resolve-build-plan requires both Desktop and Service Azure SAS URLs via --desktop-azure-sas-url/--service-azure-sas-url or PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL/PORTABLE_VERSION_SERVICE_AZURE_SAS_URL.'
+    );
+  }
+
+  parseAzureSasUrl(desktopAzureSasUrl);
+  parseAzureSasUrl(serviceAzureSasUrl);
+
+  const repositories = {
+    desktop: values['desktop-index-url'] ?? process.env.PORTABLE_VERSION_DESKTOP_INDEX_URL ?? DEFAULT_INDEX_SOURCES.desktop,
+    service: values['service-index-url'] ?? process.env.PORTABLE_VERSION_SERVICE_INDEX_URL ?? DEFAULT_INDEX_SOURCES.service,
+    portable: 'HagiCode-org/portable-version'
+  };
 
   const eventPayload = eventPath ? await readJson(eventPath) : {};
   await ensureDir(path.dirname(outputPath));
@@ -33,7 +68,12 @@ async function main() {
     eventName,
     eventPayload,
     token,
-    defaultPlatforms
+    repositories,
+    defaultPlatforms,
+    azureSasUrls: {
+      desktop: desktopAzureSasUrl,
+      service: serviceAzureSasUrl
+    }
   });
 
   await writeJson(outputPath, plan);
@@ -46,14 +86,18 @@ async function main() {
     platform_matrix: JSON.stringify(plan.platformMatrix)
   });
 
-  const remainingPlatforms = plan.platforms.join(', ');
+  const selectedPlatforms = plan.platforms.join(', ');
   await appendSummary([
     '## Portable Version build plan',
     `- Trigger: ${plan.trigger.type}`,
-    `- Desktop tag: ${plan.upstream.desktop.tag}`,
-    `- Service tag: ${plan.upstream.service.tag}`,
-    `- Platforms: ${remainingPlatforms}`,
+    `- Desktop index: ${plan.upstream.desktop.manifestUrl}`,
+    `- Desktop version: ${plan.upstream.desktop.version}`,
+    `- Service index: ${plan.upstream.service.manifestUrl}`,
+    `- Service version: ${plan.upstream.service.version}`,
+    `- Platforms: ${selectedPlatforms}`,
     `- Derived release tag: ${plan.release.tag}`,
+    `- Desktop Azure SAS: ${sanitizeUrlForLogs(desktopAzureSasUrl)}`,
+    `- Service Azure SAS: ${sanitizeUrlForLogs(serviceAzureSasUrl)}`,
     `- Release exists: ${plan.release.exists ? 'yes' : 'no'}`,
     `- Build mode: ${plan.build.dryRun ? 'dry-run' : 'publish'}`,
     plan.build.shouldBuild ? '- Packaging will continue.' : `- Packaging skipped: ${plan.build.skipReason}`

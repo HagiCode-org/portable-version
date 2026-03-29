@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { downloadFromSource, resolveAssetDownloadUrl, sanitizeUrlForLogs } from './lib/azure-blob.mjs';
 import { extractArchive } from './lib/archive.mjs';
-import { downloadReleaseAsset } from './lib/github.mjs';
 import {
   cleanDir,
   ensureDir,
@@ -15,25 +15,31 @@ import { annotateError, appendSummary } from './lib/summary.mjs';
 import { getPlatformConfig } from './lib/platforms.mjs';
 import { resolveToolchainRoots } from './lib/toolchain.mjs';
 
+async function directoryContainsPortableRoot(rootPath, portableFixedSegments) {
+  return pathExists(path.join(rootPath, ...portableFixedSegments));
+}
+
 async function resolveDesktopAppRoot(extractionRoot, platform) {
-  if (!platform.appBundleName) {
+  if (await directoryContainsPortableRoot(extractionRoot, platform.portableFixedSegments)) {
     return extractionRoot;
   }
 
-  const directAppRoot = path.join(extractionRoot, platform.appBundleName);
-  if (await pathExists(directAppRoot)) {
-    return directAppRoot;
+  if (platform.appBundleName) {
+    const directAppRoot = path.join(extractionRoot, platform.appBundleName);
+    if (await directoryContainsPortableRoot(directAppRoot, platform.portableFixedSegments)) {
+      return directAppRoot;
+    }
   }
 
   const discoveredRoot = await findFirstMatchingDirectory(
     extractionRoot,
-    async (candidate) => path.basename(candidate) === platform.appBundleName
+    async (candidate) => directoryContainsPortableRoot(candidate, platform.portableFixedSegments)
   );
   if (discoveredRoot) {
     return discoveredRoot;
   }
 
-  throw new Error(`Unable to find Desktop app bundle ${platform.appBundleName} under ${extractionRoot}.`);
+  throw new Error(`Unable to find Desktop app root for ${platform.id} under ${extractionRoot}.`);
 }
 
 async function main() {
@@ -42,7 +48,7 @@ async function main() {
       plan: { type: 'string' },
       platform: { type: 'string' },
       workspace: { type: 'string' },
-      token: { type: 'string' },
+      'azure-sas-url': { type: 'string' },
       'desktop-asset-source': { type: 'string' }
     }
   });
@@ -61,7 +67,13 @@ async function main() {
     throw new Error(`No Desktop asset mapped for platform ${platformId}.`);
   }
 
-  const token = values.token ?? process.env.PORTABLE_VERSION_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const azureSasUrl =
+    values['azure-sas-url'] ??
+    process.env.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL ??
+    process.env.DESKTOP_AZURE_BLOB_SAS_URL ??
+    process.env.PORTABLE_VERSION_AZURE_SAS_URL ??
+    process.env.AZURE_BLOB_SAS_URL ??
+    process.env.AZURE_SAS_URL;
   const downloadDirectory = path.join(workspacePath, 'downloads');
   const extractDirectory = path.join(workspacePath, 'extracted');
   const outputDirectory = path.join(workspacePath, 'release-assets');
@@ -73,8 +85,12 @@ async function main() {
   await ensureDir(outputDirectory);
   await ensureDir(desktopWorkspace);
 
-  const assetSource = values['desktop-asset-source'] ?? desktopAsset.downloadUrl;
-  await downloadReleaseAsset({ ...desktopAsset, downloadUrl: assetSource }, desktopArchivePath, token);
+  const assetSource = resolveAssetDownloadUrl({
+    asset: desktopAsset,
+    sasUrl: azureSasUrl,
+    overrideSource: values['desktop-asset-source']
+  });
+  await downloadFromSource({ sourceUrl: assetSource, destinationPath: desktopArchivePath });
   await extractArchive(desktopArchivePath, desktopWorkspace);
 
   const desktopAppRoot = await resolveDesktopAppRoot(desktopWorkspace, platform);
@@ -94,9 +110,11 @@ async function main() {
     downloadDirectory,
     extractDirectory,
     outputDirectory,
-    desktopTag: plan.upstream.desktop.tag,
+    desktopVersion: plan.upstream.desktop.version,
     desktopAssetName: desktopAsset.name,
+    desktopAssetPath: desktopAsset.path,
     desktopArchivePath,
+    desktopDownloadSource: sanitizeUrlForLogs(assetSource),
     toolchainRoot: toolchainRoots.toolchainRoot,
     toolchainBinRoot: toolchainRoots.toolchainBinRoot,
     toolchainManifestPath: toolchainRoots.toolchainManifestPath,
@@ -107,8 +125,9 @@ async function main() {
 
   await appendSummary([
     `### Workspace prepared for ${platform.id}`,
-    `- Desktop tag: ${plan.upstream.desktop.tag}`,
+    `- Desktop version: ${plan.upstream.desktop.version}`,
     `- Desktop asset: ${desktopAsset.name}`,
+    `- Download source: ${sanitizeUrlForLogs(assetSource)}`,
     `- Workspace: ${workspacePath}`,
     `- Portable root: ${portableFixedRoot}`
   ]);

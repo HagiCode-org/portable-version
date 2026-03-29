@@ -1,13 +1,86 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  mapDesktopAssetsByPlatform,
-  mapServiceAssetsByPlatform,
-  normalizeTriggerInputs
-} from '../scripts/lib/build-plan.mjs';
+import { buildPlan, normalizeTriggerInputs } from '../scripts/lib/build-plan.mjs';
 import { derivePortableReleaseTag } from '../scripts/lib/platforms.mjs';
 
 const defaultPlatforms = ['linux-x64'];
+const desktopIndexUrl = 'https://index.example.test/desktop/index.json';
+const serviceIndexUrl = 'https://index.example.test/server/index.json';
+
+const desktopIndexManifest = {
+  updatedAt: '2026-03-28T08:25:02.3306932Z',
+  versions: [
+    {
+      version: 'v0.1.9',
+      assets: [
+        { name: 'Hagicode.Desktop-0.1.9.AppImage', path: 'v0.1.9/Hagicode.Desktop-0.1.9.AppImage', size: 11 },
+        { name: 'Hagicode.Desktop.0.1.9-unpacked.zip', path: 'v0.1.9/Hagicode.Desktop.0.1.9-unpacked.zip', size: 12 },
+        { name: 'Hagicode.Desktop-0.1.9-mac.zip', path: 'v0.1.9/Hagicode.Desktop-0.1.9-mac.zip', size: 13 },
+        { name: 'Hagicode.Desktop-0.1.9-arm64-mac.zip', path: 'v0.1.9/Hagicode.Desktop-0.1.9-arm64-mac.zip', size: 14 }
+      ]
+    },
+    {
+      version: 'v0.1.34',
+      assets: [
+        { name: 'Hagicode.Desktop-0.1.34.AppImage', path: 'v0.1.34/Hagicode.Desktop-0.1.34.AppImage', size: 21 },
+        { name: 'Hagicode.Desktop.0.1.34-unpacked.zip', path: 'v0.1.34/Hagicode.Desktop.0.1.34-unpacked.zip', size: 22 },
+        { name: 'Hagicode.Desktop-0.1.34-mac.zip', path: 'v0.1.34/Hagicode.Desktop-0.1.34-mac.zip', size: 23 },
+        { name: 'Hagicode.Desktop-0.1.34-arm64-mac.zip', path: 'v0.1.34/Hagicode.Desktop-0.1.34-arm64-mac.zip', size: 24 }
+      ]
+    },
+    {
+      version: 'v0.0.1-dev.3',
+      assets: [
+        { name: 'Hagicode.Desktop-0.0.1-dev.3.AppImage', path: 'v0.0.1-dev.3/Hagicode.Desktop-0.0.1-dev.3.AppImage', size: 31 },
+        { name: 'Hagicode.Desktop.0.0.1-dev.3-unpacked.zip', path: 'v0.0.1-dev.3/Hagicode.Desktop.0.0.1-dev.3-unpacked.zip', size: 32 },
+        { name: 'Hagicode.Desktop-0.0.1-dev.3-mac.zip', path: 'v0.0.1-dev.3/Hagicode.Desktop-0.0.1-dev.3-mac.zip', size: 33 },
+        { name: 'Hagicode.Desktop-0.0.1-dev.3-arm64-mac.zip', path: 'v0.0.1-dev.3/Hagicode.Desktop-0.0.1-dev.3-arm64-mac.zip', size: 34 }
+      ]
+    }
+  ]
+};
+
+const serviceIndexManifest = {
+  updatedAt: '2026-03-28T08:25:02.3306932Z',
+  versions: [
+    {
+      version: '0.1.0-beta.22',
+      assets: [
+        { name: 'hagicode-0.1.0-beta.22-linux-x64-nort.zip', path: '0.1.0-beta.22/hagicode-0.1.0-beta.22-linux-x64-nort.zip', size: 41 },
+        { name: 'hagicode-0.1.0-beta.22-win-x64-nort.zip', path: '0.1.0-beta.22/hagicode-0.1.0-beta.22-win-x64-nort.zip', size: 42 }
+      ]
+    },
+    {
+      version: '0.1.0-beta.35',
+      assets: [
+        { name: 'hagicode-0.1.0-beta.35-linux-x64-nort.zip', path: '0.1.0-beta.35/hagicode-0.1.0-beta.35-linux-x64-nort.zip', size: 51 },
+        { name: 'hagicode-0.1.0-beta.35-win-x64-nort.zip', path: '0.1.0-beta.35/hagicode-0.1.0-beta.35-win-x64-nort.zip', size: 52 }
+      ]
+    },
+    {
+      version: '0.1.0-beta.33',
+      assets: [
+        { name: 'hagicode-0.1.0-beta.33-linux-x64-nort.zip', path: '0.1.0-beta.33/hagicode-0.1.0-beta.33-linux-x64-nort.zip', size: 61 },
+        { name: 'hagicode-0.1.0-beta.33-win-x64-nort.zip', path: '0.1.0-beta.33/hagicode-0.1.0-beta.33-win-x64-nort.zip', size: 62 }
+      ]
+    }
+  ]
+};
+
+function createFetchStub(fixtures) {
+  return async (url) => {
+    if (!(url in fixtures)) {
+      throw new Error(`Unexpected URL ${url}`);
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return fixtures[url];
+      }
+    };
+  };
+}
 
 test('normalizeTriggerInputs uses workflow_dispatch overrides and booleans', () => {
   const normalized = normalizeTriggerInputs({
@@ -24,8 +97,8 @@ test('normalizeTriggerInputs uses workflow_dispatch overrides and booleans', () 
     defaultPlatforms
   });
 
-  assert.equal(normalized.desktopTag, 'v0.2.0');
-  assert.equal(normalized.serviceTag, 'v0.1.0-beta.33');
+  assert.equal(normalized.desktopSelector, 'v0.2.0');
+  assert.equal(normalized.serviceSelector, 'v0.1.0-beta.33');
   assert.deepEqual(normalized.selectedPlatforms, ['linux-x64', 'win-x64']);
   assert.equal(normalized.forceRebuild, true);
   assert.equal(normalized.dryRun, true);
@@ -43,38 +116,70 @@ test('normalizeTriggerInputs requires repository_dispatch versions', () => {
   );
 });
 
-test('mapServiceAssetsByPlatform matches framework-dependent runtime assets', () => {
-  const mapped = mapServiceAssetsByPlatform(
-    {
-      assets: [
-        { id: 1, name: 'hagicode-0.1.0-beta.33-linux-x64-nort.zip', browser_download_url: 'https://example.test/linux.zip' },
-        { id: 2, name: 'hagicode-0.1.0-beta.33-win-x64-nort.zip', browser_download_url: 'https://example.test/win.zip' }
-      ]
+test('buildPlan resolves latest index versions and platform assets', async () => {
+  const plan = await buildPlan({
+    eventName: 'schedule',
+    eventPayload: {},
+    repositories: {
+      desktop: desktopIndexUrl,
+      service: serviceIndexUrl,
+      portable: 'HagiCode-org/portable-version'
     },
-    ['linux-x64', 'win-x64']
-  );
+    defaultPlatforms: ['linux-x64', 'win-x64'],
+    azureSasUrls: {
+      desktop: 'https://example.blob.core.windows.net/desktop?sp=rl&sig=desktop-token',
+      service: 'https://example.blob.core.windows.net/server?sp=rl&sig=service-token'
+    },
+    fetchImpl: createFetchStub({
+      [desktopIndexUrl]: desktopIndexManifest,
+      [serviceIndexUrl]: serviceIndexManifest
+    }),
+    findPortableRelease: async () => null,
+    now: '2026-03-29T00:00:00.000Z'
+  });
 
-  assert.equal(mapped['linux-x64'].name, 'hagicode-0.1.0-beta.33-linux-x64-nort.zip');
-  assert.equal(mapped['win-x64'].name, 'hagicode-0.1.0-beta.33-win-x64-nort.zip');
+  assert.equal(plan.upstream.desktop.version, 'v0.1.34');
+  assert.equal(plan.upstream.service.version, '0.1.0-beta.35');
+  assert.equal(plan.upstream.desktop.assetsByPlatform['linux-x64'].path, 'v0.1.34/Hagicode.Desktop-0.1.34.AppImage');
+  assert.equal(plan.upstream.desktop.assetsByPlatform['win-x64'].name, 'Hagicode.Desktop.0.1.34-unpacked.zip');
+  assert.equal(plan.upstream.service.assetsByPlatform['linux-x64'].path, '0.1.0-beta.35/hagicode-0.1.0-beta.35-linux-x64-nort.zip');
+  assert.equal(plan.downloads.desktop.containerUrl, 'https://example.blob.core.windows.net/desktop/');
+  assert.equal(plan.downloads.service.containerUrl, 'https://example.blob.core.windows.net/server/');
+  assert.equal(plan.build.shouldBuild, true);
 });
 
-test('mapDesktopAssetsByPlatform matches published Desktop archives', () => {
-  const mapped = mapDesktopAssetsByPlatform(
-    {
-      assets: [
-        { id: 1, name: 'hagicode-desktop-0.1.32.zip', browser_download_url: 'https://example.test/linux.zip' },
-        { id: 2, name: 'Hagicode.Desktop.0.1.32-unpacked.zip', browser_download_url: 'https://example.test/win.zip' },
-        { id: 3, name: 'Hagicode.Desktop-0.1.32-mac.zip', browser_download_url: 'https://example.test/osx-x64.zip' },
-        { id: 4, name: 'Hagicode.Desktop-0.1.32-arm64-mac.zip', browser_download_url: 'https://example.test/osx-arm64.zip' }
-      ]
+test('buildPlan normalizes explicit selectors and reuses existing release state', async () => {
+  const existingRelease = { html_url: 'https://github.com/HagiCode-org/portable-version/releases/tag/pv-release-fixture' };
+  const plan = await buildPlan({
+    eventName: 'workflow_dispatch',
+    eventPayload: {
+      inputs: {
+        desktop_tag: 'refs/tags/v0.1.34',
+        service_tag: 'refs/tags/v0.1.0-beta.33',
+        platforms: 'linux-x64',
+        dry_run: 'true'
+      }
     },
-    ['linux-x64', 'win-x64', 'osx-x64', 'osx-arm64']
-  );
+    repositories: {
+      desktop: desktopIndexUrl,
+      service: serviceIndexUrl,
+      portable: 'HagiCode-org/portable-version'
+    },
+    defaultPlatforms,
+    fetchImpl: createFetchStub({
+      [desktopIndexUrl]: desktopIndexManifest,
+      [serviceIndexUrl]: serviceIndexManifest
+    }),
+    findPortableRelease: async (_repository, tag) => ({ ...existingRelease, tag_name: tag })
+  });
 
-  assert.equal(mapped['linux-x64'].name, 'hagicode-desktop-0.1.32.zip');
-  assert.equal(mapped['win-x64'].name, 'Hagicode.Desktop.0.1.32-unpacked.zip');
-  assert.equal(mapped['osx-x64'].name, 'Hagicode.Desktop-0.1.32-mac.zip');
-  assert.equal(mapped['osx-arm64'].name, 'Hagicode.Desktop-0.1.32-arm64-mac.zip');
+  assert.equal(plan.upstream.desktop.selector, 'v0.1.34');
+  assert.equal(plan.upstream.desktop.version, 'v0.1.34');
+  assert.equal(plan.upstream.service.selector, 'v0.1.0-beta.33');
+  assert.equal(plan.upstream.service.version, '0.1.0-beta.33');
+  assert.equal(plan.release.tag, derivePortableReleaseTag('v0.1.34', '0.1.0-beta.33'));
+  assert.equal(plan.release.exists, true);
+  assert.equal(plan.build.shouldBuild, false);
 });
 
 test('derivePortableReleaseTag creates an independent Portable Version tag namespace', () => {

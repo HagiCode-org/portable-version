@@ -22,8 +22,8 @@ test('publish-release emits a dry-run publication report', async () => {
   await writeJson(planPath, {
     trigger: { type: 'workflow_dispatch' },
     upstream: {
-      desktop: { repository: 'HagiCode-org/desktop', tag: 'v0.2.0' },
-      service: { repository: 'HagiCode-org/releases', tag: 'v0.1.0-beta.33' }
+      desktop: { manifestUrl: 'https://index.hagicode.com/desktop/index.json', version: 'v0.2.0' },
+      service: { manifestUrl: 'https://index.hagicode.com/server/index.json', version: '0.1.0-beta.33' }
     },
     release: {
       repository: 'HagiCode-org/portable-version',

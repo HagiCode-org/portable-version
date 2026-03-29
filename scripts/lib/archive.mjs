@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { rm } from 'node:fs/promises';
+import { chmod, rm } from 'node:fs/promises';
 import { runCommand } from './command.mjs';
 import { ensureDir } from './fs-utils.mjs';
 
@@ -18,6 +18,22 @@ export async function extractArchive(archivePath, destinationPath) {
     }
 
     await runCommand('unzip', ['-oq', archivePath, '-d', destinationPath]);
+    return;
+  }
+
+  if (lowerPath.endsWith('.appimage')) {
+    if (process.platform === 'win32') {
+      throw new Error(`AppImage extraction is not supported on ${process.platform}.`);
+    }
+
+    await chmod(archivePath, 0o755);
+    await runCommand(archivePath, ['--appimage-extract'], {
+      cwd: destinationPath,
+      env: {
+        ...process.env,
+        APPIMAGE_EXTRACT_AND_RUN: '1'
+      }
+    });
     return;
   }
 

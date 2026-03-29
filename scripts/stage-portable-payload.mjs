@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { downloadFromSource, resolveAssetDownloadUrl, sanitizeUrlForLogs } from './lib/azure-blob.mjs';
 import { extractArchive } from './lib/archive.mjs';
-import { downloadReleaseAsset } from './lib/github.mjs';
 import {
   cleanDir,
   copyDir,
@@ -60,7 +60,8 @@ async function main() {
       plan: { type: 'string' },
       platform: { type: 'string' },
       workspace: { type: 'string' },
-      token: { type: 'string' }
+      'azure-sas-url': { type: 'string' },
+      'service-asset-source': { type: 'string' }
     }
   });
 
@@ -76,14 +77,26 @@ async function main() {
     throw new Error(`No service asset mapped for platform ${values.platform}.`);
   }
 
-  const token = values.token ?? process.env.PORTABLE_VERSION_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const azureSasUrl =
+    values['azure-sas-url'] ??
+    process.env.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL ??
+    process.env.SERVICE_AZURE_BLOB_SAS_URL ??
+    process.env.PORTABLE_VERSION_AZURE_SAS_URL ??
+    process.env.AZURE_BLOB_SAS_URL ??
+    process.env.AZURE_SAS_URL;
   const downloadPath = path.join(workspaceManifest.downloadDirectory, asset.name);
   const extractionPath = path.join(workspaceManifest.extractDirectory, values.platform);
   const stagedCurrentPath = path.join(workspaceManifest.portableFixedRoot, 'current');
 
   await ensureDir(workspaceManifest.downloadDirectory);
   await ensureDir(extractionPath);
-  await downloadReleaseAsset(asset, downloadPath, token);
+
+  const assetSource = resolveAssetDownloadUrl({
+    asset,
+    sasUrl: azureSasUrl,
+    overrideSource: values['service-asset-source']
+  });
+  await downloadFromSource({ sourceUrl: assetSource, destinationPath: downloadPath });
   await extractArchive(downloadPath, extractionPath);
 
   const runtimeRoot = await resolveRuntimeRoot(extractionPath);
@@ -99,7 +112,10 @@ async function main() {
   const validationReportPath = path.join(workspacePath, `payload-validation-${values.platform}.json`);
   await writeJson(validationReportPath, {
     platform: values.platform,
+    serviceVersion: plan.upstream.service.version,
     assetName: asset.name,
+    assetPath: asset.path,
+    downloadSource: sanitizeUrlForLogs(assetSource),
     downloadPath,
     extractionPath,
     runtimeRoot,
@@ -116,7 +132,9 @@ async function main() {
 
   await appendSummary([
     `### Portable payload staged for ${values.platform}`,
+    `- Service version: ${plan.upstream.service.version}`,
     `- Asset: ${asset.name}`,
+    `- Download source: ${sanitizeUrlForLogs(assetSource)}`,
     `- Extracted root: ${runtimeRoot}`,
     `- Staged path: ${stagedCurrentPath}`
   ]);
