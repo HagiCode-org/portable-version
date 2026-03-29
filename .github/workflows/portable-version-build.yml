@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       desktop_tag:
-        description: 'Optional Desktop release tag override.'
+        description: 'Optional Desktop version selector override (accepts refs/tags/vX, vX, or X).'
         required: false
         type: string
       service_tag:
-        description: 'Optional service release tag override.'
+        description: 'Optional service version selector override (accepts refs/tags/vX, vX, or X).'
         required: false
         type: string
       platforms:
@@ -44,6 +44,8 @@ concurrency:
 env:
   DEFAULT_PLATFORMS: linux-x64,win-x64,osx-x64,osx-arm64
   PORTABLE_VERSION_GITHUB_TOKEN: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
+  PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL }}
+  PORTABLE_VERSION_SERVICE_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL }}
 
 jobs:
   resolve:
