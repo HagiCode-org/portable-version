@@ -1,16 +1,15 @@
-import { findReleaseByTag, getLatestEligibleRelease, getReleaseByTag } from './github.mjs';
+import { getAzureBlobContainerUrl, sanitizeUrlForLogs } from './azure-blob.mjs';
+import { findReleaseByTag } from './github.mjs';
+import { DEFAULT_INDEX_SOURCES, resolveIndexRelease } from './index-source.mjs';
 import {
   createPlatformMatrix,
   derivePortableReleaseTag,
-  matchDesktopAssetForPlatform,
-  matchServiceAssetForPlatform,
-  normalizePlatforms,
-  stripGitRef
+  normalizePlatforms
 } from './platforms.mjs';
 
 const DEFAULT_REPOSITORIES = {
-  desktop: 'HagiCode-org/desktop',
-  service: 'HagiCode-org/releases',
+  desktop: DEFAULT_INDEX_SOURCES.desktop,
+  service: DEFAULT_INDEX_SOURCES.service,
   portable: 'HagiCode-org/portable-version'
 };
 
@@ -43,9 +42,8 @@ export function normalizeTriggerInputs({ eventName, eventPayload, defaultPlatfor
   const inputs = eventPayload?.inputs ?? {};
   const dispatchPayload = eventPayload?.client_payload ?? {};
 
-  const triggerType = eventName;
-  const desktopTag = coalesce(inputs.desktop_tag, dispatchPayload.desktopTag, dispatchPayload.desktop_tag);
-  const serviceTag = coalesce(inputs.service_tag, dispatchPayload.serviceTag, dispatchPayload.service_tag);
+  const desktopSelector = coalesce(inputs.desktop_tag, dispatchPayload.desktopTag, dispatchPayload.desktop_tag);
+  const serviceSelector = coalesce(inputs.service_tag, dispatchPayload.serviceTag, dispatchPayload.service_tag);
   const platforms = coalesce(inputs.platforms, dispatchPayload.platforms);
   const forceRebuild = normalizeBoolean(
     coalesce(inputs.force_rebuild, dispatchPayload.forceRebuild, dispatchPayload.force_rebuild),
@@ -53,65 +51,27 @@ export function normalizeTriggerInputs({ eventName, eventPayload, defaultPlatfor
   );
   const dryRun = normalizeBoolean(coalesce(inputs.dry_run, dispatchPayload.dryRun, dispatchPayload.dry_run), false);
 
-  if (eventName === 'repository_dispatch' && (!desktopTag || !serviceTag)) {
+  if (eventName === 'repository_dispatch' && (!desktopSelector || !serviceSelector)) {
     throw new Error(
       'repository_dispatch payload must include both desktopTag and serviceTag so the build plan stays non-interactive.'
     );
   }
 
   return {
-    triggerType,
-    desktopTag,
-    serviceTag,
+    triggerType: eventName,
+    desktopSelector,
+    serviceSelector,
     selectedPlatforms: normalizePlatforms(platforms, defaultPlatforms),
     forceRebuild,
     dryRun,
     rawInputs: {
-      desktopTag,
-      serviceTag,
-      platforms,
-      forceRebuild,
-      dryRun
+      desktop_tag: desktopSelector ?? null,
+      service_tag: serviceSelector ?? null,
+      platforms: platforms ?? null,
+      force_rebuild: forceRebuild,
+      dry_run: dryRun
     }
   };
-}
-
-export async function resolveReleaseContext({ repository, tag, token }) {
-  return tag
-    ? getReleaseByTag(repository, stripGitRef(tag), token)
-    : getLatestEligibleRelease(repository, token);
-}
-
-export function mapServiceAssetsByPlatform(serviceRelease, platforms) {
-  const assetsByPlatform = {};
-  for (const platformId of platforms) {
-    const asset = matchServiceAssetForPlatform(serviceRelease.assets ?? [], platformId);
-    assetsByPlatform[platformId] = {
-      id: asset.id,
-      name: asset.name,
-      size: asset.size,
-      contentType: asset.content_type,
-      downloadUrl: asset.browser_download_url,
-      apiUrl: asset.url
-    };
-  }
-  return assetsByPlatform;
-}
-
-export function mapDesktopAssetsByPlatform(desktopRelease, platforms) {
-  const assetsByPlatform = {};
-  for (const platformId of platforms) {
-    const asset = matchDesktopAssetForPlatform(desktopRelease.assets ?? [], platformId);
-    assetsByPlatform[platformId] = {
-      id: asset.id,
-      name: asset.name,
-      size: asset.size,
-      contentType: asset.content_type,
-      downloadUrl: asset.browser_download_url,
-      apiUrl: asset.url
-    };
-  }
-  return assetsByPlatform;
 }
 
 export async function buildPlan({
@@ -120,7 +80,10 @@ export async function buildPlan({
   token,
   repositories = DEFAULT_REPOSITORIES,
   defaultPlatforms,
-  now = new Date().toISOString()
+  now = new Date().toISOString(),
+  fetchImpl,
+  findPortableRelease = findReleaseByTag,
+  azureSasUrls
 }) {
   const trigger = normalizeTriggerInputs({
     eventName,
@@ -128,31 +91,45 @@ export async function buildPlan({
     defaultPlatforms
   });
 
-  const desktopRelease = await resolveReleaseContext({
-    repository: repositories.desktop,
-    tag: trigger.desktopTag,
-    token
-  });
-  const serviceRelease = await resolveReleaseContext({
-    repository: repositories.service,
-    tag: trigger.serviceTag,
-    token
-  });
+  const [desktopRelease, serviceRelease] = await Promise.all([
+    resolveIndexRelease({
+      sourceType: 'desktop',
+      indexUrl: repositories.desktop,
+      selector: trigger.desktopSelector,
+      platforms: trigger.selectedPlatforms,
+      fetchImpl
+    }),
+    resolveIndexRelease({
+      sourceType: 'service',
+      indexUrl: repositories.service,
+      selector: trigger.serviceSelector,
+      platforms: trigger.selectedPlatforms,
+      fetchImpl
+    })
+  ]);
 
-  const resolvedDesktopTag = stripGitRef(desktopRelease.tag_name);
-  const resolvedServiceTag = stripGitRef(serviceRelease.tag_name);
-  const releaseTag = derivePortableReleaseTag(resolvedDesktopTag, resolvedServiceTag);
-  const desktopAssetsByPlatform = mapDesktopAssetsByPlatform(desktopRelease, trigger.selectedPlatforms);
-  const assetsByPlatform = mapServiceAssetsByPlatform(serviceRelease, trigger.selectedPlatforms);
-  const existingPortableRelease = await findReleaseByTag(repositories.portable, releaseTag, token);
+  const releaseTag = derivePortableReleaseTag(desktopRelease.version, serviceRelease.version);
+  const existingPortableRelease = await findPortableRelease(repositories.portable, releaseTag, token);
   const releaseExists = Boolean(existingPortableRelease);
   const shouldBuild = !releaseExists || trigger.forceRebuild;
   const skipReason = !shouldBuild
     ? `Portable Version release ${releaseTag} already exists and force_rebuild was not enabled.`
     : null;
 
+  const downloads = {
+    strategy: 'azure-blob-sas',
+    desktop: {
+      containerUrl: azureSasUrls?.desktop ? getAzureBlobContainerUrl(azureSasUrls.desktop) : null,
+      redactedSasUrl: azureSasUrls?.desktop ? sanitizeUrlForLogs(azureSasUrls.desktop) : null
+    },
+    service: {
+      containerUrl: azureSasUrls?.service ? getAzureBlobContainerUrl(azureSasUrls.service) : null,
+      redactedSasUrl: azureSasUrls?.service ? sanitizeUrlForLogs(azureSasUrls.service) : null
+    }
+  };
+
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: now,
     repositories,
     trigger: {
@@ -161,25 +138,10 @@ export async function buildPlan({
     },
     platforms: trigger.selectedPlatforms,
     platformMatrix: createPlatformMatrix(trigger.selectedPlatforms),
+    downloads,
     upstream: {
-      desktop: {
-        repository: repositories.desktop,
-        tag: resolvedDesktopTag,
-        name: desktopRelease.name,
-        publishedAt: desktopRelease.published_at,
-        url: desktopRelease.html_url,
-        releaseId: desktopRelease.id,
-        assetsByPlatform: desktopAssetsByPlatform
-      },
-      service: {
-        repository: repositories.service,
-        tag: resolvedServiceTag,
-        name: serviceRelease.name,
-        publishedAt: serviceRelease.published_at,
-        url: serviceRelease.html_url,
-        releaseId: serviceRelease.id,
-        assetsByPlatform
-      }
+      desktop: desktopRelease,
+      service: serviceRelease
     },
     release: {
       repository: repositories.portable,

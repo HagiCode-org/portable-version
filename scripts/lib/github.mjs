@@ -60,9 +60,9 @@ export async function getLatestEligibleRelease(repository, token) {
 }
 
 export async function downloadReleaseAsset(asset, destinationPath, token) {
-  const downloadUrl = asset.browser_download_url ?? asset.downloadUrl ?? asset.url;
+  const downloadUrl = asset.downloadUrl;
   if (!downloadUrl) {
-    throw new Error(`Asset ${asset.name ?? asset.id} does not have a download URL.`);
+    throw new Error(`Asset ${asset.name ?? asset.id} does not provide an explicit downloadUrl.`);
   }
 
   if (downloadUrl.startsWith('file://')) {
