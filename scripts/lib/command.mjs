@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
 
+export function shouldUseWindowsShell(command, shell, platform = process.platform) {
+  if (shell || platform !== 'win32') {
+    return shell;
+  }
+
+  return /\.(?:cmd|bat)$/i.test(String(command));
+}
+
 export async function runCommand(command, args, options = {}) {
   const {
     cwd,
@@ -13,7 +21,7 @@ export async function runCommand(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd,
       env,
-      shell,
+      shell: shouldUseWindowsShell(command, shell),
       stdio: stdio === 'pipe' ? ['pipe', 'pipe', 'pipe'] : stdio
     });
 
@@ -61,7 +69,7 @@ export async function runCommandResult(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd,
       env,
-      shell,
+      shell: shouldUseWindowsShell(command, shell),
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
