@@ -1,8 +1,8 @@
 # portable-version
 
-This repository automates Portable Version builds for HagiCode Desktop by resolving upstream Desktop and service releases, downloading the published Desktop archives, injecting the fixed portable payload, repacking the archive, and publishing a deterministic GitHub Release.
+This repository automates Portable Version builds for HagiCode Desktop by resolving upstream Desktop and Server packages from the official index manifests, downloading the indexed raw assets through Azure Blob SAS URLs, injecting the fixed portable payload, repacking the archive, and publishing a deterministic GitHub Release.
 
-Portable builds now also bundle a pinned Node.js runtime and a preinstalled OpenSpec CLI so the unpacked archive can run `node`, `openspec`, and `opsx` without depending on machine-wide installations.
+Portable builds also bundle a pinned Node.js runtime and a preinstalled OpenSpec CLI so the unpacked archive can run `node`, `openspec`, and `opsx` without depending on machine-wide installations.
 
 ## Trigger modes
 
@@ -10,29 +10,44 @@ The main workflow is `.github/workflows/portable-version-build.yml`.
 
 It supports three non-interactive entrypoints:
 
-- `schedule` polls upstream releases on a daily cadence.
-- `workflow_dispatch` supports targeted rebuilds with optional Desktop tag, service tag, platform, dry-run, and force-rebuild inputs.
-- `repository_dispatch` accepts future-compatible `client_payload` fields (`desktopTag`, `serviceTag`, `platforms`, `forceRebuild`, `dryRun`).
+- `schedule` polls the Desktop and Server index manifests on a daily cadence.
+- `workflow_dispatch` supports targeted rebuilds with optional Desktop selector, service selector, platform, dry-run, and force-rebuild inputs.
+- `repository_dispatch` accepts `client_payload` fields (`desktopTag`, `serviceTag`, `platforms`, `forceRebuild`, `dryRun`) and still requires both selectors so the automation stays non-interactive.
 
 ## Workflow inputs
 
 `workflow_dispatch` accepts these inputs:
 
-- `desktop_tag`: optional Desktop GitHub Release tag override.
-- `service_tag`: optional service release tag override from `HagiCode-org/releases`.
+- `desktop_tag`: optional Desktop version selector. `refs/tags/v0.1.34`, `v0.1.34`, and `0.1.34` are normalized to the same selector.
+- `service_tag`: optional Server version selector. `refs/tags/v0.1.0-beta.35`, `v0.1.0-beta.35`, and `0.1.0-beta.35` are normalized to the same selector.
 - `platforms`: comma-separated platforms. Supported values are `linux-x64`, `win-x64`, `osx-x64`, `osx-arm64`, or `all`.
 - `force_rebuild`: keep packaging even if the derived Portable Version release already exists.
 - `dry_run`: skip GitHub Release publication while still resolving, staging, and packaging.
 
-Repository dispatch payloads must include both `desktopTag` and `serviceTag` so the automation stays non-interactive.
+When no selector is provided, the build plan resolves the latest indexed Desktop version and the latest indexed Server version.
+
+## Data sources and download model
+
+Portable Version now uses a single upstream discovery model:
+
+- Desktop index: `https://index.hagicode.com/desktop/index.json`
+- Server index: `https://index.hagicode.com/server/index.json`
+
+The resolve step reads those manifests, picks the selected version entries, and records the matched platform assets. Packaging then downloads the raw archives by combining:
+
+- the asset `path` from the index manifest
+- the Desktop Azure Blob SAS container URL from `PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL`
+- the Server Azure Blob SAS container URL from `PORTABLE_VERSION_SERVICE_AZURE_SAS_URL`
+
+The build plan artifact stores index metadata and the redacted Desktop/Server SAS container info, but it does not persist the live SAS token.
 
 ## Required secrets and permissions
 
-The workflow expects a token with enough access to read release metadata from upstream repositories and create releases in `HagiCode-org/portable-version`.
+Recommended repository secrets:
 
-Recommended repository secret:
-
-- `PORTABLE_VERSION_GITHUB_TOKEN`: personal access token or GitHub App token with `contents:read` on upstream repositories and `contents:write` on `portable-version`.
+- `PORTABLE_VERSION_GITHUB_TOKEN`: token with `contents:write` on `HagiCode-org/portable-version`. It is only used for the final GitHub Release publication and release existence checks.
+- `PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL`: Desktop Azure Blob container SAS URL with at least `Read` and `List` permissions. Example shape: `https://<account>.blob.core.windows.net/<desktop-container>?<sas-token>`.
+- `PORTABLE_VERSION_SERVICE_AZURE_SAS_URL`: Server Azure Blob container SAS URL with at least `Read` and `List` permissions. Example shape: `https://<account>.blob.core.windows.net/<service-container>?<sas-token>`.
 
 Workflow permissions are set to:
 
@@ -43,14 +58,13 @@ Workflow permissions are set to:
 
 The automation currently assumes:
 
-- automatic scheduled builds default to the full platform matrix: `linux-x64`, `win-x64`, `osx-x64`, and `osx-arm64`.
-- Desktop release assets are consumed directly instead of rebuilding from source. Current archive patterns are `hagicode-desktop-<version>.zip` for Linux, `Hagicode.Desktop.<version>-unpacked.zip` for Windows, and the published macOS zip archives for macOS targets.
-- service release assets follow the framework-dependent naming contract used by HagiCode releases, for example `hagicode-0.1.0-beta.33-linux-x64-nort.zip`.
-- the selected service asset extracts to a structure that contains `manifest.json`, `config/`, `lib/PCode.Web.dll`, `lib/PCode.Web.runtimeconfig.json`, and `lib/PCode.Web.deps.json`.
-- the downloaded Desktop archive already contains `resources/extra/portable-fixed/` or `Contents/Resources/extra/portable-fixed/`, and the workflow injects the runtime into `current/` inside that directory.
+- scheduled builds default to the full platform matrix: `linux-x64`, `win-x64`, `osx-x64`, and `osx-arm64`.
+- Desktop assets are selected from index `assets[]` by platform-specific naming rules. Linux prefers zip fixtures when present and otherwise falls back to the indexed AppImage; Windows uses the published `*-unpacked.zip`; macOS uses the published zip archives.
+- Server assets follow the framework-dependent naming contract used by HagiCode releases, for example `hagicode-0.1.0-beta.35-linux-x64-nort.zip`.
+- the selected Server asset extracts to a structure that contains `manifest.json`, `config/`, `lib/PCode.Web.dll`, `lib/PCode.Web.runtimeconfig.json`, and `lib/PCode.Web.deps.json`.
+- the downloaded Desktop asset already contains `resources/extra/portable-fixed/` or `Contents/Resources/extra/portable-fixed/`, and the workflow injects the runtime into `current/` inside that directory.
 - the portable toolchain manifest is defined in `config/portable-toolchain.json`, which pins the Node.js distribution per platform and the bundled OpenSpec CLI package version.
 - the repacked archive stages the portable toolchain under `portable-fixed/toolchain/`, including `node/`, `npm-global/`, `bin/openspec`, `bin/opsx`, `env/activate.*`, and `toolchain-manifest.json`.
-- repacking the downloaded Desktop archive must preserve the original release layout so the resulting Portable Version still boots as a normal Desktop build.
 
 ## Local verification
 
@@ -61,39 +75,50 @@ npm test
 npm run verify:dry-run
 ```
 
-The dry-run test uses fixture assets and validates Desktop archive download/extraction, service asset extraction, payload injection, archive repacking, and publish-ready inventory generation without creating a GitHub Release.
+The dry-run test uses fixture assets and validates Desktop archive preparation, Server payload extraction, toolchain staging, and archive repacking without publishing a GitHub Release.
 
-The dry-run flow now also validates portable toolchain staging and verification:
+For manual local staging you can override the network download step with fixture files:
 
-- `scripts/stage-portable-toolchain.mjs` downloads the pinned Node runtime into `portable-fixed/toolchain/node`, installs the pinned OpenSpec CLI into `portable-fixed/toolchain/npm-global`, and emits `portable-fixed/toolchain/toolchain-manifest.json`.
-- `scripts/verify-portable-toolchain.mjs` prepends the portable PATH and checks `node --version`, `openspec --version`, and `opsx status --help`.
-- each platform workspace emits `toolchain-validation-<platform>.json`, and the workflow uploads that report together with the repacked archive inventory and checksums.
+- `scripts/prepare-packaging-workspace.mjs --desktop-asset-source <file-or-url>`
+- `scripts/stage-portable-payload.mjs --service-asset-source <file-or-url>`
 
-Inside the unpacked archive, portable command entrypoints live under:
+Those overrides are intended for tests and diagnostics only. Production packaging must use index `asset.path + PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL` or `asset.path + PORTABLE_VERSION_SERVICE_AZURE_SAS_URL`, depending on the asset source.
 
-- `resources/extra/portable-fixed/toolchain/bin/openspec` and `opsx` on Linux/macOS
-- `resources/extra/portable-fixed/toolchain/bin/openspec.cmd` and `opsx.cmd` on Windows
-- `resources/extra/portable-fixed/toolchain/env/activate.*` helper scripts for session-scoped PATH injection
+## Migration notes
+
+This repository no longer supports the old GitHub Release-driven build-plan structure.
+
+Removed assumptions:
+
+- upstream Desktop and Server discovery from GitHub Release metadata
+- old `releaseId`, release asset API URLs, and compatibility field mappings in `build-plan.json`
+- fallback downloads through release asset URLs during packaging
+
+If you have external tooling that consumes `build-plan.json`, migrate it to the new structure:
+
+- `upstream.desktop.version` / `upstream.service.version`
+- `upstream.*.manifestUrl`
+- `upstream.*.assetsByPlatform[platform].path`
+- `downloads.strategy === "azure-blob-sas"`
 
 ## Manual recovery steps
 
 Use these recovery paths when a workflow run fails or must be replayed:
 
-1. Re-run the workflow with `workflow_dispatch` and set `dry_run=true` to confirm the build plan and payload staging without publishing.
-2. If the derived Portable Version release already exists but the prior upload was partial, re-run with `force_rebuild=true` so archive injection and publication update the existing release.
-3. If upstream assets changed or were republished, supply explicit `desktop_tag` and `service_tag` inputs so the run uses a known-good version pair.
+1. Re-run the workflow with `workflow_dispatch` and set `dry_run=true` to confirm index resolution, payload staging, and repacking without publishing.
+2. If the derived Portable Version release already exists but the prior upload was partial, re-run with `force_rebuild=true`.
+3. If a specific upstream pair must be replayed, supply explicit `desktop_tag` and `service_tag` selectors.
 4. Inspect the uploaded workflow artifacts:
    - `build-plan`
    - `portable-package-<platform>`
    - `release-metadata-<release-tag>`
-   - `toolchain-validation-<platform>.json`
-5. Review the workflow summary for the exact validation failure, missing platform asset, or publication command error.
+5. Review the workflow summary for the exact selector mismatch, missing indexed asset, SAS download failure, or publication error.
 
 ## Derived release outputs
 
 Each successful build publishes:
 
-- one deterministic Portable Version tag in the `pv-release-<hash>` namespace, so the tag stays Portable Version specific instead of exposing Desktop/Service versions directly
+- one deterministic Portable Version tag in the `pv-release-<hash>` namespace
 - repacked Desktop artifacts copied to deterministic asset names such as `hagicode-portable-linux-x64.zip`
 - the normalized build manifest
 - merged artifact inventory metadata
