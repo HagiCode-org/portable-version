@@ -5,7 +5,7 @@ const PLATFORM_MAP = {
     id: 'linux-x64',
     runtimeKey: 'linux-x64-nort',
     runner: 'ubuntu-latest',
-    desktopAssetPatterns: [/^hagicode-desktop-[^-]+\.[^.]+\.zip$/i, /^hagicode-desktop-.*\.zip$/i],
+    desktopAssetPatterns: [/^hagicode-desktop-[^-]+\.[^.]+\.zip$/i, /^hagicode-desktop-.*\.zip$/i, /\.appimage$/i],
     portableFixedSegments: ['resources', 'extra', 'portable-fixed'],
     toolchain: {
       shell: 'posix',
@@ -145,17 +145,16 @@ export function createPlatformMatrix(platforms) {
 
 export function matchDesktopAssetForPlatform(assets, platformId) {
   const platform = getPlatformConfig(platformId);
-  const candidates = assets.filter((asset) =>
-    platform.desktopAssetPatterns.some((pattern) => pattern.test(asset.name))
-  );
-
-  if (candidates.length === 0) {
-    throw new Error(
-      `Missing Desktop release asset for ${platformId}. Expected one of: ${platform.desktopAssetPatterns.map((pattern) => pattern.source).join(', ')}`
-    );
+  for (const pattern of platform.desktopAssetPatterns) {
+    const candidates = assets.filter((asset) => pattern.test(asset.name));
+    if (candidates.length > 0) {
+      return candidates.sort((left, right) => left.name.localeCompare(right.name))[0];
+    }
   }
 
-  return candidates.sort((left, right) => left.name.localeCompare(right.name))[0];
+  throw new Error(
+    `Missing Desktop release asset for ${platformId}. Expected one of: ${platform.desktopAssetPatterns.map((pattern) => pattern.source).join(', ')}`
+  );
 }
 
 export function matchServiceAssetForPlatform(assets, platformId) {
