@@ -25,6 +25,7 @@ test('default toolchain manifest pins supported platforms', async () => {
   assert.ok(resolvePortableToolchainPlatform(config, 'win-x64'));
   assert.ok(resolvePortableToolchainPlatform(config, 'osx-x64'));
   assert.ok(resolvePortableToolchainPlatform(config, 'osx-arm64'));
+  assert.ok(resolvePortableToolchainPlatform(config, 'osx-universal'));
 });
 
 test('toolchain shims cover unix and windows entrypoints', () => {
