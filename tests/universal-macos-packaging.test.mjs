@@ -118,7 +118,7 @@ test('universal macOS packaging writes bundle metadata and preserves both payloa
       }
     },
     release: {
-      tag: 'pv-release-macos-universal'
+      tag: 'v0.1.0-beta.33-v0.2.0'
     },
     build: {
       dryRun: true
@@ -240,7 +240,7 @@ test('universal macOS staging fails before packaging when a required payload mem
       }
     },
     release: {
-      tag: 'pv-release-macos-universal-missing'
+      tag: 'v0.1.0-beta.33-v0.2.0-missing'
     },
     build: {
       dryRun: true

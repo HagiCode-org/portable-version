@@ -70,7 +70,7 @@ test('dry-run packaging stages payload and emits inventory metadata', async () =
       }
     },
     release: {
-      tag: 'pv-release-d680cc63b74a'
+      tag: 'v0.1.0-beta.33-v0.2.0'
     },
     build: {
       dryRun: true

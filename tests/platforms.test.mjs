@@ -37,11 +37,11 @@ test('createPlatformMatrix returns runner metadata', () => {
 
 test('buildDeterministicAssetName produces stable publish-friendly names', () => {
   assert.equal(
-    buildDeterministicAssetName('pv-release-380d772cc976', 'linux-x64', 'HagiCode Desktop 0.1.0.AppImage'),
+    buildDeterministicAssetName('v0.1.0-beta.33-v0.1.31', 'linux-x64', 'HagiCode Desktop 0.1.0.AppImage'),
     'hagicode-portable-linux-x64.zip'
   );
   assert.equal(
-    buildDeterministicAssetName('pv-release-380d772cc976', 'osx-universal', 'HagiCode Desktop 0.1.0-mac.zip'),
+    buildDeterministicAssetName('v0.1.0-beta.33-v0.1.31', 'osx-universal', 'HagiCode Desktop 0.1.0-mac.zip'),
     'hagicode-portable-osx-universal.zip'
   );
 });

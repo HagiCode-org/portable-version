@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPlan, normalizeTriggerInputs } from '../scripts/lib/build-plan.mjs';
-import { derivePortableReleaseTag } from '../scripts/lib/platforms.mjs';
+import { derivePortableReleaseTag, normalizeReleaseTagComponent } from '../scripts/lib/platforms.mjs';
 
 const defaultPlatforms = ['linux-x64'];
 const desktopIndexUrl = 'https://index.example.test/desktop/index.json';
@@ -145,11 +145,16 @@ test('buildPlan resolves latest index versions and platform assets', async () =>
   assert.equal(plan.upstream.service.assetsByPlatform['linux-x64'].path, '0.1.0-beta.35/hagicode-0.1.0-beta.35-linux-x64-nort.zip');
   assert.equal(plan.downloads.desktop.containerUrl, 'https://example.blob.core.windows.net/desktop/');
   assert.equal(plan.downloads.service.containerUrl, 'https://example.blob.core.windows.net/server/');
+  assert.equal(plan.release.tag, 'v0.1.0-beta.35-v0.1.34');
+  assert.equal(plan.release.name, 'Portable Version v0.1.0-beta.35-v0.1.34');
+  assert.equal(plan.release.notesTitle, 'Portable Version v0.1.0-beta.35-v0.1.34');
   assert.equal(plan.build.shouldBuild, true);
 });
 
 test('buildPlan normalizes explicit selectors and reuses existing release state', async () => {
-  const existingRelease = { html_url: 'https://github.com/HagiCode-org/portable-version/releases/tag/pv-release-fixture' };
+  const existingRelease = {
+    html_url: 'https://github.com/HagiCode-org/portable-version/releases/tag/v0.1.0-beta.33-v0.1.34'
+  };
   const plan = await buildPlan({
     eventName: 'workflow_dispatch',
     eventPayload: {
@@ -177,14 +182,20 @@ test('buildPlan normalizes explicit selectors and reuses existing release state'
   assert.equal(plan.upstream.desktop.version, 'v0.1.34');
   assert.equal(plan.upstream.service.selector, 'v0.1.0-beta.33');
   assert.equal(plan.upstream.service.version, '0.1.0-beta.33');
-  assert.equal(plan.release.tag, derivePortableReleaseTag('v0.1.34', '0.1.0-beta.33'));
+  assert.equal(plan.release.tag, derivePortableReleaseTag('0.1.0-beta.33', 'v0.1.34'));
   assert.equal(plan.release.exists, true);
   assert.equal(plan.build.shouldBuild, false);
 });
 
-test('derivePortableReleaseTag creates an independent Portable Version tag namespace', () => {
+test('derivePortableReleaseTag canonicalizes service and desktop tags before concatenation', () => {
   assert.equal(
-    derivePortableReleaseTag('v0.1.31', 'v0.1.0-beta.33'),
-    'pv-release-380d772cc976'
+    derivePortableReleaseTag('refs/tags/v0.1.0-beta.33', '0.1.31'),
+    'v0.1.0-beta.33-v0.1.31'
   );
+});
+
+test('normalizeReleaseTagComponent collapses equivalent selector forms into canonical v-prefixed tags', () => {
+  assert.equal(normalizeReleaseTagComponent('refs/tags/v0.1.34'), 'v0.1.34');
+  assert.equal(normalizeReleaseTagComponent('v0.1.34'), 'v0.1.34');
+  assert.equal(normalizeReleaseTagComponent('0.1.34'), 'v0.1.34');
 });
