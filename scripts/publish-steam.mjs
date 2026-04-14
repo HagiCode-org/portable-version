@@ -9,6 +9,8 @@ import { ensureDir, pathExists, readJson, writeJson } from './lib/fs-utils.mjs';
 import { annotateError, appendSummary } from './lib/summary.mjs';
 
 const STEAM_GUARD_ALPHABET = '23456789BCDFGHJKMNPQRTVWXY';
+const UNIFIED_MACOS_CONTENT_PLATFORM = 'osx-universal';
+const MACOS_PLATFORM_IDS = new Set(['osx-x64', 'osx-arm64']);
 const PLATFORM_OPTIONS = [
   { id: 'linux-x64', cliOption: 'linux-depot-id' },
   { id: 'win-x64', cliOption: 'windows-depot-id' },
@@ -103,7 +105,15 @@ async function resolveDepotDefinitions(options, contentRoot) {
       continue;
     }
 
-    const platformContentRoot = path.join(contentRoot, platform.id);
+    let platformContentRoot = path.join(contentRoot, platform.id);
+    let sourcePlatform = platform.id;
+    if (!(await pathExists(platformContentRoot)) && MACOS_PLATFORM_IDS.has(platform.id)) {
+      const universalRoot = path.join(contentRoot, UNIFIED_MACOS_CONTENT_PLATFORM);
+      if (await pathExists(universalRoot)) {
+        platformContentRoot = universalRoot;
+        sourcePlatform = UNIFIED_MACOS_CONTENT_PLATFORM;
+      }
+    }
     if (!(await pathExists(platformContentRoot))) {
       throw new Error(`Steam content for ${platform.id} is missing at ${platformContentRoot}.`);
     }
@@ -111,6 +121,7 @@ async function resolveDepotDefinitions(options, contentRoot) {
     depotDefinitions.push({
       depotId,
       platform: platform.id,
+      sourcePlatform,
       contentRoot: platformContentRoot,
       fileName: `depot-build-${platform.id}.vdf`
     });
@@ -193,9 +204,10 @@ async function main() {
     preview,
     branch: values.branch.trim() || null,
     dryRun,
-    depots: depotDefinitions.map(({ depotId, platform, contentRoot: root, vdfPath }) => ({
+    depots: depotDefinitions.map(({ depotId, platform, sourcePlatform, contentRoot: root, vdfPath }) => ({
       depotId,
       platform,
+      sourcePlatform,
       contentRoot: root,
       vdfPath
     })),
