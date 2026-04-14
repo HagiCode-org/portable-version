@@ -108,7 +108,7 @@ export async function buildPlan({
     })
   ]);
 
-  const releaseTag = derivePortableReleaseTag(desktopRelease.version, serviceRelease.version);
+  const releaseTag = derivePortableReleaseTag(serviceRelease.version, desktopRelease.version);
   const existingPortableRelease = await findPortableRelease(repositories.portable, releaseTag, token);
   const releaseExists = Boolean(existingPortableRelease);
   const shouldBuild = !releaseExists || trigger.forceRebuild;

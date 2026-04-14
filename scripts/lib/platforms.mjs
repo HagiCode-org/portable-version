@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 const POSIX_TOOLCHAIN = {
   shell: 'posix',
   nodeBinSegments: ['bin'],
@@ -152,18 +150,23 @@ export function normalizePlatforms(value, fallback = DEFAULT_PLATFORMS) {
   return normalized;
 }
 
-export function derivePortableReleaseTag(desktopTag, serviceTag) {
-  const normalizedDesktopTag = stripGitRef(desktopTag);
-  const normalizedServiceTag = stripGitRef(serviceTag).replace(/^v/i, '');
-  const fingerprint = createHash('sha256')
-    .update(`portable-version|desktop:${normalizedDesktopTag}|service:${normalizedServiceTag}`)
-    .digest('hex')
-    .slice(0, 12);
-  return `pv-release-${fingerprint}`;
-}
-
 export function stripGitRef(value) {
   return String(value).replace(/^refs\/tags\//, '').trim();
+}
+
+export function normalizeReleaseTagComponent(value) {
+  const normalized = stripGitRef(value);
+  if (!normalized) {
+    throw new Error('Release tag components must be non-empty.');
+  }
+
+  return `v${normalized.replace(/^v/i, '')}`;
+}
+
+export function derivePortableReleaseTag(serviceTag, desktopTag) {
+  const normalizedServiceTag = normalizeReleaseTagComponent(serviceTag);
+  const normalizedDesktopTag = normalizeReleaseTagComponent(desktopTag);
+  return `${normalizedServiceTag}-${normalizedDesktopTag}`;
 }
 
 export function createPlatformMatrix(platforms) {
