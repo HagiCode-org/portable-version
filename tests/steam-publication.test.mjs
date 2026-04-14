@@ -65,6 +65,53 @@ test('publish-steam emits build scripts in dry-run mode', async () => {
   assert.match(linuxDepot, /"DepotID" "1234561"/);
 });
 
+test('publish-steam reuses one universal macOS content root for both mac depots', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'portable-version-steam-macos-'));
+  const planPath = path.join(tempRoot, 'build-plan.json');
+  const contentRoot = path.join(tempRoot, 'steam-content');
+  const outputDir = path.join(tempRoot, 'steam-build');
+
+  await mkdir(path.join(contentRoot, 'osx-universal'), { recursive: true });
+  await writeFile(path.join(contentRoot, 'osx-universal', 'Hagicode Desktop.app'), 'mac bundle', 'utf8');
+
+  await writeJson(planPath, {
+    upstream: {
+      desktop: { version: 'v0.2.0' },
+      service: { version: '0.1.0-beta.33' }
+    },
+    release: {
+      tag: 'pv-release-macos-universal'
+    }
+  });
+
+  await runCommand('node', [
+    path.join(repoRoot, 'scripts', 'publish-steam.mjs'),
+    '--plan',
+    planPath,
+    '--content-root',
+    contentRoot,
+    '--output-dir',
+    outputDir,
+    '--app-id',
+    '7654321',
+    '--macos-x64-depot-id',
+    '7654322',
+    '--macos-arm64-depot-id',
+    '7654323',
+    '--force-dry-run'
+  ]);
+
+  const manifest = await readJson(path.join(outputDir, 'steam-build-manifest.json'));
+  const x64Depot = await readFile(path.join(outputDir, 'scripts', 'depot-build-osx-x64.vdf'), 'utf8');
+  const arm64Depot = await readFile(path.join(outputDir, 'scripts', 'depot-build-osx-arm64.vdf'), 'utf8');
+
+  assert.equal(manifest.depots.length, 2);
+  assert.equal(manifest.depots[0].sourcePlatform, 'osx-universal');
+  assert.equal(manifest.depots[1].sourcePlatform, 'osx-universal');
+  assert.match(x64Depot, /osx-universal/);
+  assert.match(arm64Depot, /osx-universal/);
+});
+
 test('generateSteamGuardCode returns the expected length', () => {
   const code = generateSteamGuardCode('aGVsbG8gd29ybGQ=');
   assert.equal(code.length, 5);
