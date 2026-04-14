@@ -1,4 +1,4 @@
-name: portable-version-build
+name: portable-version-release
 
 on:
   schedule:
@@ -28,25 +28,6 @@ on:
         required: false
         default: false
         type: boolean
-      publish_to_steam:
-        description: 'Upload the packaged app contents to Steam after the GitHub Release job succeeds.'
-        required: false
-        default: false
-        type: boolean
-      steam_preview:
-        description: 'Generate a Steam preview build instead of publishing a live Steam update.'
-        required: false
-        default: true
-        type: boolean
-      steam_branch:
-        description: 'Optional Steam branch to set live. Leave empty to avoid changing the live branch.'
-        required: false
-        default: ''
-        type: string
-      steam_description:
-        description: 'Optional Steam build description override.'
-        required: false
-        type: string
   repository_dispatch:
     types:
       - portable-version-build
@@ -57,7 +38,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: portable-version-${{ github.event_name }}-${{ github.ref || github.run_id }}
+  group: portable-version-release-${{ github.event_name }}-${{ github.ref || github.run_id }}
   cancel-in-progress: false
 
 env:
@@ -99,10 +80,10 @@ jobs:
             --output "$RUNNER_TEMP/build-plan.json" \
             --default-platforms "$DEFAULT_PLATFORMS"
 
-      - name: Upload build plan artifact
+      - name: Upload Portable Version release plan artifact
         uses: actions/upload-artifact@v6
         with:
-          name: build-plan
+          name: portable-release-build-plan
           path: ${{ runner.temp }}/build-plan.json
           if-no-files-found: error
 
@@ -124,10 +105,10 @@ jobs:
           node-version: '22'
           package-manager-cache: false
 
-      - name: Download build plan artifact
+      - name: Download Portable Version release plan artifact
         uses: actions/download-artifact@v8
         with:
-          name: build-plan
+          name: portable-release-build-plan
           path: ${{ runner.temp }}/build-plan
 
       - name: Prepare Desktop archive workspace
@@ -182,47 +163,16 @@ jobs:
             --platform "${{ matrix.platform }}" \
             --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
 
-      - name: Upload packaged platform artifacts
+      - name: Upload Portable Version package artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: portable-package-${{ matrix.platform }}
+          name: portable-release-package-${{ matrix.platform }}
           path: |
             ${{ runner.temp }}/portable-version-${{ matrix.platform }}/artifact-inventory-${{ matrix.platform }}.json
             ${{ runner.temp }}/portable-version-${{ matrix.platform }}/artifact-checksums-${{ matrix.platform }}.txt
             ${{ runner.temp }}/portable-version-${{ matrix.platform }}/payload-validation-${{ matrix.platform }}.json
             ${{ runner.temp }}/portable-version-${{ matrix.platform }}/toolchain-validation-${{ matrix.platform }}.json
             ${{ runner.temp }}/portable-version-${{ matrix.platform }}/release-assets
-          if-no-files-found: error
-
-      - name: Stage Steam content artifact
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_steam == 'true'
-        working-directory: .
-        shell: bash
-        env:
-          PLATFORM_ID: ${{ matrix.platform }}
-        run: |
-          node --input-type=module <<'EOF'
-          import path from 'node:path';
-          import { cp, mkdir, readFile } from 'node:fs/promises';
-
-          const workspaceRoot = path.join(process.env.RUNNER_TEMP, `portable-version-${process.env.PLATFORM_ID}`);
-          const manifestPath = path.join(workspaceRoot, 'workspace-manifest.json');
-          const inventoryPath = path.join(workspaceRoot, `artifact-inventory-${process.env.PLATFORM_ID}.json`);
-          const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-          const inventory = JSON.parse(await readFile(inventoryPath, 'utf8'));
-          const publicationPlatform = inventory.bundle?.publicationPlatform || process.env.PLATFORM_ID;
-          const targetRoot = path.join(process.env.RUNNER_TEMP, 'steam-content', publicationPlatform);
-
-          await mkdir(path.dirname(targetRoot), { recursive: true });
-          await cp(manifest.desktopWorkspace, targetRoot, { recursive: true, force: true });
-          EOF
-
-      - name: Upload Steam content artifact
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_steam == 'true'
-        uses: actions/upload-artifact@v6
-        with:
-          name: steam-content-${{ matrix.platform }}
-          path: ${{ runner.temp }}/steam-content/${{ matrix.platform }}
           if-no-files-found: error
 
   publish:
@@ -242,20 +192,20 @@ jobs:
           node-version: '22'
           package-manager-cache: false
 
-      - name: Download build plan artifact
+      - name: Download Portable Version release plan artifact
         uses: actions/download-artifact@v8
         with:
-          name: build-plan
+          name: portable-release-build-plan
           path: ${{ runner.temp }}/build-plan
 
-      - name: Download packaged artifacts
+      - name: Download packaged Portable Version artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: portable-package-*
+          pattern: portable-release-package-*
           merge-multiple: true
           path: ${{ runner.temp }}/publish-input
 
-      - name: Publish GitHub Release or emit dry-run report
+      - name: Publish Portable Version release or emit dry-run report
         working-directory: .
         shell: bash
         env:
@@ -266,104 +216,9 @@ jobs:
             --artifacts-dir "$RUNNER_TEMP/publish-input" \
             --output-dir "$RUNNER_TEMP/release-metadata"
 
-      - name: Upload publication metadata
+      - name: Upload Portable Version release metadata
         uses: actions/upload-artifact@v6
         with:
-          name: release-metadata-${{ needs.resolve.outputs.release_tag }}
+          name: portable-release-metadata-${{ needs.resolve.outputs.release_tag }}
           path: ${{ runner.temp }}/release-metadata
-          if-no-files-found: error
-
-  publish_steam:
-    name: Publish Steam build
-    needs:
-      - resolve
-      - package
-      - publish
-    if: needs.resolve.outputs.should_build == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_steam == 'true'
-    runs-on: ubuntu-latest
-    env:
-      STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
-      STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
-      STEAM_SHARED_SECRET: ${{ secrets.STEAM_SHARED_SECRET }}
-      STEAM_GUARD_CODE: ${{ secrets.STEAM_GUARD_CODE }}
-    steps:
-      - name: Checkout portable-version
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          package-manager-cache: false
-
-      - name: Download build plan artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: build-plan
-          path: ${{ runner.temp }}/build-plan
-
-      - name: Download Steam content artifacts
-        uses: actions/download-artifact@v8
-        with:
-          pattern: steam-content-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/steam-content
-
-      - name: Install SteamCMD
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/steamcmd"
-          curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C "$RUNNER_TEMP/steamcmd"
-
-      - name: Publish Steam build
-        working-directory: .
-        shell: bash
-        env:
-          STEAM_APP_ID: ${{ secrets.STEAM_APP_ID }}
-          STEAM_DEPOT_ID_LINUX: ${{ secrets.STEAM_DEPOT_ID_LINUX }}
-          STEAM_DEPOT_ID_WINDOWS: ${{ secrets.STEAM_DEPOT_ID_WINDOWS }}
-          STEAM_DEPOT_ID_MACOS_X64: ${{ secrets.STEAM_DEPOT_ID_MACOS_X64 }}
-          STEAM_DEPOT_ID_MACOS_ARM64: ${{ secrets.STEAM_DEPOT_ID_MACOS_ARM64 }}
-          STEAMCMD_PATH: ${{ runner.temp }}/steamcmd/steamcmd.sh
-          STEAM_BRANCH_INPUT: ${{ github.event.inputs.steam_branch }}
-          STEAM_DESCRIPTION_INPUT: ${{ github.event.inputs.steam_description }}
-          STEAM_PREVIEW_INPUT: ${{ github.event.inputs.steam_preview }}
-        run: |
-          cmd=(
-            node scripts/publish-steam.mjs
-            --plan "$RUNNER_TEMP/build-plan/build-plan.json"
-            --content-root "$RUNNER_TEMP/steam-content"
-            --output-dir "$RUNNER_TEMP/steam-build"
-            --app-id "$STEAM_APP_ID"
-          )
-
-          if [ -n "$STEAM_DEPOT_ID_LINUX" ]; then
-            cmd+=(--linux-depot-id "$STEAM_DEPOT_ID_LINUX")
-          fi
-          if [ -n "$STEAM_DEPOT_ID_WINDOWS" ]; then
-            cmd+=(--windows-depot-id "$STEAM_DEPOT_ID_WINDOWS")
-          fi
-          if [ -n "$STEAM_DEPOT_ID_MACOS_X64" ]; then
-            cmd+=(--macos-x64-depot-id "$STEAM_DEPOT_ID_MACOS_X64")
-          fi
-          if [ -n "$STEAM_DEPOT_ID_MACOS_ARM64" ]; then
-            cmd+=(--macos-arm64-depot-id "$STEAM_DEPOT_ID_MACOS_ARM64")
-          fi
-          if [ -n "$STEAM_BRANCH_INPUT" ]; then
-            cmd+=(--branch "$STEAM_BRANCH_INPUT")
-          fi
-          if [ -n "$STEAM_DESCRIPTION_INPUT" ]; then
-            cmd+=(--description "$STEAM_DESCRIPTION_INPUT")
-          fi
-          if [ "$STEAM_PREVIEW_INPUT" = 'true' ]; then
-            cmd+=(--preview)
-          fi
-
-          "${cmd[@]}"
-
-      - name: Upload Steam build metadata
-        uses: actions/upload-artifact@v6
-        with:
-          name: steam-build-metadata-${{ needs.resolve.outputs.release_tag }}
-          path: ${{ runner.temp }}/steam-build
           if-no-files-found: error
