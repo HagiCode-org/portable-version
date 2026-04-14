@@ -16,6 +16,24 @@ function getHeaders(token) {
   return headers;
 }
 
+function normalizeReleaseAsset(asset) {
+  return {
+    ...asset,
+    downloadUrl: asset?.downloadUrl ?? asset?.browser_download_url ?? asset?.url ?? null
+  };
+}
+
+function normalizeRelease(release) {
+  if (!release || typeof release !== 'object') {
+    return release;
+  }
+
+  return {
+    ...release,
+    assets: Array.isArray(release.assets) ? release.assets.map(normalizeReleaseAsset) : []
+  };
+}
+
 async function requestJson(endpoint, token, { allowNotFound = false } = {}) {
   const response = await fetch(`${API_ROOT}${endpoint}`, {
     headers: getHeaders(token)
@@ -34,11 +52,15 @@ async function requestJson(endpoint, token, { allowNotFound = false } = {}) {
 }
 
 export async function listReleases(repository, token, perPage = 20) {
-  return requestJson(`/repos/${repository}/releases?per_page=${perPage}`, token);
+  const releases = await requestJson(`/repos/${repository}/releases?per_page=${perPage}`, token);
+  return Array.isArray(releases) ? releases.map(normalizeRelease) : [];
 }
 
 export async function getReleaseByTag(repository, tag, token, { allowNotFound = false } = {}) {
-  return requestJson(`/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`, token, { allowNotFound });
+  const release = await requestJson(`/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`, token, {
+    allowNotFound
+  });
+  return normalizeRelease(release);
 }
 
 export async function findReleaseByTag(repository, tag, token) {
@@ -57,6 +79,14 @@ export async function getLatestEligibleRelease(repository, token) {
     const rightTime = Date.parse(right.published_at ?? right.created_at ?? 0);
     return rightTime - leftTime;
   })[0];
+}
+
+export function findReleaseAssetByName(release, assetName) {
+  if (!Array.isArray(release?.assets)) {
+    return null;
+  }
+
+  return release.assets.find((asset) => asset?.name === assetName) ?? null;
 }
 
 export async function downloadReleaseAsset(asset, destinationPath, token) {
