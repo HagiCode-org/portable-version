@@ -199,6 +199,7 @@ async function main() {
   const manifestPath = path.join(outputDir, 'steam-build-manifest.json');
   await writeJson(manifestPath, {
     releaseTag: plan.release.tag,
+    planPath: path.resolve(values.plan),
     appId: values['app-id'],
     description,
     preview,
@@ -211,15 +212,19 @@ async function main() {
       contentRoot: root,
       vdfPath
     })),
+    contentRoot,
     appBuildPath
   });
 
   if (dryRun) {
     await appendSummary([
-      '## Steam publication dry-run',
+      '## Portable Version Steam publication dry-run',
+      `- Release tag: ${plan.release.tag}`,
       `- App ID: ${values['app-id']}`,
       `- Preview mode: ${preview ? 'enabled' : 'disabled'}`,
       `- Depot count: ${depotDefinitions.length}`,
+      `- Depot platforms: ${depotDefinitions.map((depot) => depot.platform).join(', ')}`,
+      `- Content root: ${contentRoot}`,
       `- App build script: ${appBuildPath}`
     ]);
     console.log(JSON.stringify({ manifestPath, appBuildPath, depotCount: depotDefinitions.length }, null, 2));
@@ -253,10 +258,13 @@ async function main() {
   ]);
 
   await appendSummary([
-    '## Steam publication complete',
+    '## Portable Version Steam publication complete',
+    `- Release tag: ${plan.release.tag}`,
     `- App ID: ${values['app-id']}`,
     `- Preview mode: ${preview ? 'enabled' : 'disabled'}`,
     `- Depot count: ${depotDefinitions.length}`,
+    `- Depot platforms: ${depotDefinitions.map((depot) => depot.platform).join(', ')}`,
+    `- Content root: ${contentRoot}`,
     `- App build script: ${appBuildPath}`
   ]);
 
@@ -269,7 +277,7 @@ if (isDirectExecution) {
   main().catch(async (error) => {
     annotateError(error.message);
     await appendSummary([
-      '## Steam publication failed',
+      '## Portable Version Steam publication failed',
       `- ${error.message}`
     ]);
     console.error(error);

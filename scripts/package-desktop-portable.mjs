@@ -112,6 +112,7 @@ async function main() {
 
   const summaryLines = [
     `### Packaging complete for ${values.platform}`,
+    `- Release tag: ${plan.release.tag}`,
     `- Mode: ${dryRun ? 'dry-run' : 'publish-ready'}`,
     `- Inventory: ${inventoryPath}`,
     `- Checksums: ${checksumsPath}`,

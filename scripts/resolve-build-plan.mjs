@@ -88,14 +88,14 @@ async function main() {
 
   const selectedPlatforms = plan.platforms.join(', ');
   await appendSummary([
-    '## Portable Version build plan',
+    '## Portable Version release plan',
     `- Trigger: ${plan.trigger.type}`,
     `- Desktop index: ${plan.upstream.desktop.manifestUrl}`,
     `- Desktop version: ${plan.upstream.desktop.version}`,
     `- Service index: ${plan.upstream.service.manifestUrl}`,
     `- Service version: ${plan.upstream.service.version}`,
     `- Platforms: ${selectedPlatforms}`,
-    `- Derived release tag: ${plan.release.tag}`,
+    `- Derived release tag (web-desktop): ${plan.release.tag}`,
     `- Desktop Azure SAS: ${sanitizeUrlForLogs(desktopAzureSasUrl)}`,
     `- Service Azure SAS: ${sanitizeUrlForLogs(serviceAzureSasUrl)}`,
     `- Release exists: ${plan.release.exists ? 'yes' : 'no'}`,
@@ -103,13 +103,23 @@ async function main() {
     plan.build.shouldBuild ? '- Packaging will continue.' : `- Packaging skipped: ${plan.build.skipReason}`
   ]);
 
-  console.log(JSON.stringify({ outputPath, releaseTag: plan.release.tag, shouldBuild: plan.build.shouldBuild }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        outputPath,
+        releaseTag: plan.release.tag,
+        shouldBuild: plan.build.shouldBuild
+      },
+      null,
+      2
+    )
+  );
 }
 
 main().catch(async (error) => {
   annotateError(error.message);
   await appendSummary([
-    '## Portable Version build plan failed',
+    '## Portable Version release plan failed',
     `- ${error.message}`
   ]);
   console.error(error);

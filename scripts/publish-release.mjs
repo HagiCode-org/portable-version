@@ -11,17 +11,19 @@ function getGhCommand() {
 }
 
 function buildReleaseNotes(plan, inventories) {
+  const releaseTag = plan.release.tag;
+  const releaseName = plan.release.name ?? `Portable Version ${releaseTag}`;
   const platformList = inventories.map((inventory) => inventory.platform).join(', ');
   const desktopSource = `${plan.upstream.desktop.manifestUrl}@${plan.upstream.desktop.version}`;
-  const serviceSource = `${plan.upstream.service.manifestUrl}@${plan.upstream.service.version}`;
+  const webSource = `${plan.upstream.service.manifestUrl}@${plan.upstream.service.version}`;
   return [
-    `# ${plan.release.name}`,
+    `# ${releaseName}`,
     '',
     'Automated Portable Version release.',
     '',
-    `- Portable release tag: ${plan.release.tag}`,
+    `- Portable release tag: ${releaseTag}`,
     `- Desktop source: ${desktopSource}`,
-    `- Service source: ${serviceSource}`,
+    `- Web(service) source: ${webSource}`,
     `- Trigger: ${plan.trigger.type}`,
     `- Platforms: ${platformList}`,
     `- Mode: ${plan.build.dryRun ? 'dry-run' : 'publish'}`
@@ -30,19 +32,21 @@ function buildReleaseNotes(plan, inventories) {
 
 async function ensureReleaseExists(plan, notesPath) {
   const gh = getGhCommand();
-  const baseArgs = ['release', 'view', plan.release.tag, '--repo', plan.release.repository];
+  const releaseTag = plan.release.tag;
+  const releaseName = plan.release.name ?? `Portable Version ${releaseTag}`;
+  const baseArgs = ['release', 'view', releaseTag, '--repo', plan.release.repository];
   try {
     await runCommand(gh, baseArgs, { stdio: 'pipe' });
-    await runCommand(gh, ['release', 'edit', plan.release.tag, '--repo', plan.release.repository, '--title', plan.release.name, '--notes-file', notesPath]);
+    await runCommand(gh, ['release', 'edit', releaseTag, '--repo', plan.release.repository, '--title', releaseName, '--notes-file', notesPath]);
   } catch {
     await runCommand(gh, [
       'release',
       'create',
-      plan.release.tag,
+      releaseTag,
       '--repo',
       plan.release.repository,
       '--title',
-      plan.release.name,
+      releaseName,
       '--notes-file',
       notesPath,
       '--target',
@@ -92,6 +96,7 @@ async function main() {
   const artifactsDir = path.resolve(values['artifacts-dir']);
   const outputDir = path.resolve(values['output-dir'] ?? path.join(artifactsDir, 'release-metadata'));
   const dryRun = values['force-dry-run'] || Boolean(plan.build.dryRun);
+  const releaseTag = plan.release.tag;
   await ensureDir(outputDir);
 
   const entries = await readdir(artifactsDir);
@@ -101,15 +106,15 @@ async function main() {
     inventoryFiles.sort().map((entry) => readJson(path.join(artifactsDir, entry)))
   );
   const mergedInventory = {
-    releaseTag: plan.release.tag,
+    releaseTag,
     dryRun,
     platforms: inventories.map((inventory) => inventory.platform),
     artifacts: inventories.flatMap((inventory) => inventory.artifacts)
   };
-  const mergedInventoryPath = path.join(outputDir, `${plan.release.tag}.artifact-inventory.json`);
-  const buildManifestPath = path.join(outputDir, `${plan.release.tag}.build-manifest.json`);
-  const notesPath = path.join(outputDir, `${plan.release.tag}.release-notes.md`);
-  const mergedChecksumsPath = path.join(outputDir, `${plan.release.tag}.checksums.txt`);
+  const mergedInventoryPath = path.join(outputDir, `${releaseTag}.artifact-inventory.json`);
+  const buildManifestPath = path.join(outputDir, `${releaseTag}.build-manifest.json`);
+  const notesPath = path.join(outputDir, `${releaseTag}.release-notes.md`);
+  const mergedChecksumsPath = path.join(outputDir, `${releaseTag}.checksums.txt`);
 
   await writeJson(mergedInventoryPath, mergedInventory);
   await writeJson(buildManifestPath, plan);
@@ -132,16 +137,16 @@ async function main() {
   ];
 
   if (dryRun) {
-    const dryRunReportPath = path.join(outputDir, `${plan.release.tag}.publish-dry-run.json`);
+    const dryRunReportPath = path.join(outputDir, `${releaseTag}.publish-dry-run.json`);
     await writeJson(dryRunReportPath, {
-      releaseTag: plan.release.tag,
+      releaseTag,
       repository: plan.release.repository,
       notesPath,
       assetFiles
     });
     await appendSummary([
-      '## Release publication dry-run',
-      `- Release tag: ${plan.release.tag}`,
+      '## Portable Version release publication dry-run',
+      `- Release tag: ${releaseTag}`,
       `- Assets prepared: ${assetFiles.length}`,
       `- Report: ${dryRunReportPath}`
     ]);
@@ -153,19 +158,19 @@ async function main() {
   await uploadAssets(plan, assetFiles);
 
   await appendSummary([
-    '## Release publication complete',
+    '## Portable Version release publication complete',
     `- Repository: ${plan.release.repository}`,
-    `- Release tag: ${plan.release.tag}`,
+    `- Release tag: ${releaseTag}`,
     `- Assets uploaded: ${assetFiles.length}`
   ]);
 
-  console.log(JSON.stringify({ releaseTag: plan.release.tag, assetCount: assetFiles.length }, null, 2));
+  console.log(JSON.stringify({ releaseTag, assetCount: assetFiles.length }, null, 2));
 }
 
 main().catch(async (error) => {
   annotateError(error.message);
   await appendSummary([
-    '## Release publication failed',
+    '## Portable Version release publication failed',
     `- ${error.message}`
   ]);
   console.error(error);
