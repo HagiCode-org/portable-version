@@ -11,7 +11,7 @@ The main workflow is `.github/workflows/portable-version-build.yml`.
 It supports three non-interactive entrypoints:
 
 - `schedule` polls the Desktop and Server index manifests on a daily cadence.
-- `workflow_dispatch` supports targeted rebuilds with optional Desktop selector, service selector, platform, dry-run, and force-rebuild inputs.
+- `workflow_dispatch` supports targeted rebuilds with optional Desktop selector, service selector, platform, dry-run, Steam publication, and force-rebuild inputs.
 - `repository_dispatch` accepts `client_payload` fields (`desktopTag`, `serviceTag`, `platforms`, `forceRebuild`, `dryRun`) and still requires both selectors so the automation stays non-interactive.
 
 ## Workflow inputs
@@ -23,6 +23,10 @@ It supports three non-interactive entrypoints:
 - `platforms`: comma-separated platforms. Supported values are `linux-x64`, `win-x64`, `osx-x64`, `osx-arm64`, or `all`.
 - `force_rebuild`: keep packaging even if the derived Portable Version release already exists.
 - `dry_run`: skip GitHub Release publication while still resolving, staging, and packaging.
+- `publish_to_steam`: after the GitHub Release job completes, upload the unpacked platform contents to Steam.
+- `steam_preview`: generate a Steam preview build instead of publishing a live Steam update. This defaults to `true` for safer first runs.
+- `steam_branch`: optional Steam branch to set live. Leave empty to upload without changing the live branch.
+- `steam_description`: optional Steam build description override.
 
 When no selector is provided, the build plan resolves the latest indexed Desktop version and the latest indexed Server version.
 
@@ -49,6 +53,18 @@ Recommended repository secrets:
 - `PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL`: Desktop Azure Blob container SAS URL with at least `Read` and `List` permissions. Example shape: `https://<account>.blob.core.windows.net/<desktop-container>?<sas-token>`.
 - `PORTABLE_VERSION_SERVICE_AZURE_SAS_URL`: Server Azure Blob container SAS URL with at least `Read` and `List` permissions. Example shape: `https://<account>.blob.core.windows.net/<service-container>?<sas-token>`.
 
+Steam publication uses these additional repository secrets:
+
+- `STEAM_APP_ID`: Steam app id for the Desktop product.
+- `STEAM_DEPOT_ID_LINUX`: depot id for Linux builds.
+- `STEAM_DEPOT_ID_WINDOWS`: depot id for Windows builds.
+- `STEAM_DEPOT_ID_MACOS_X64`: depot id for Intel macOS builds.
+- `STEAM_DEPOT_ID_MACOS_ARM64`: depot id for Apple Silicon macOS builds.
+- `STEAM_USERNAME`: Steam build account name.
+- `STEAM_PASSWORD`: Steam build account password.
+- `STEAM_SHARED_SECRET`: optional Steam Guard shared secret for fully unattended uploads.
+- `STEAM_GUARD_CODE`: optional fallback Steam Guard code when a shared secret is not available.
+
 Workflow permissions are set to:
 
 - `contents: write`
@@ -65,6 +81,19 @@ The automation currently assumes:
 - the downloaded Desktop asset already contains `resources/extra/portable-fixed/` or `Contents/Resources/extra/portable-fixed/`, and the workflow injects the runtime into `current/` inside that directory.
 - the portable toolchain manifest is defined in `config/portable-toolchain.json`, which pins the Node.js distribution per platform and the bundled OpenSpec CLI package version.
 - the repacked archive stages the portable toolchain under `portable-fixed/toolchain/`, including `node/`, `npm-global/`, `bin/openspec`, `bin/opsx`, `env/activate.*`, and `toolchain-manifest.json`.
+
+## Steam publication flow
+
+Steam uploads reuse the unpacked application directory produced during packaging instead of the final zipped release asset. When `publish_to_steam=true` on `workflow_dispatch`, each packaging job uploads a `steam-content-<platform>` artifact, and the `publish_steam` job then:
+
+- downloads the unpacked app contents for every requested platform
+- installs `steamcmd` on `ubuntu-latest`
+- generates app and depot VDF scripts under `steam-build/scripts/`
+- logs in with `STEAM_USERNAME` and `STEAM_PASSWORD`
+- derives a Steam Guard code from `STEAM_SHARED_SECRET` when available, otherwise uses `STEAM_GUARD_CODE` if provided
+- runs `steamcmd +run_app_build` in preview or publish mode
+
+`steam_preview=true` keeps the Steam upload in preview mode so you can validate depot mappings and authentication without pushing a live update. Once the preview run succeeds, re-run with `steam_preview=false` and optionally set `steam_branch` if you want the build to go live on a specific branch.
 
 ## Local verification
 
