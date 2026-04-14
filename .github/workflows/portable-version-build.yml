@@ -14,7 +14,7 @@ on:
         required: false
         type: string
       platforms:
-        description: 'Comma-separated platforms (linux-x64, win-x64, osx-x64, osx-arm64, or all).'
+        description: 'Comma-separated platforms (linux-x64, win-x64, osx-universal, osx-x64, osx-arm64, or all).'
         required: false
         default: 'linux-x64'
         type: string
@@ -61,7 +61,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEFAULT_PLATFORMS: linux-x64,win-x64,osx-x64,osx-arm64
+  DEFAULT_PLATFORMS: linux-x64,win-x64,osx-universal
   PORTABLE_VERSION_GITHUB_TOKEN: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
   PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL }}
   PORTABLE_VERSION_SERVICE_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL }}
@@ -207,8 +207,11 @@ jobs:
 
           const workspaceRoot = path.join(process.env.RUNNER_TEMP, `portable-version-${process.env.PLATFORM_ID}`);
           const manifestPath = path.join(workspaceRoot, 'workspace-manifest.json');
+          const inventoryPath = path.join(workspaceRoot, `artifact-inventory-${process.env.PLATFORM_ID}.json`);
           const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-          const targetRoot = path.join(process.env.RUNNER_TEMP, 'steam-content', process.env.PLATFORM_ID);
+          const inventory = JSON.parse(await readFile(inventoryPath, 'utf8'));
+          const publicationPlatform = inventory.bundle?.publicationPlatform || process.env.PLATFORM_ID;
+          const targetRoot = path.join(process.env.RUNNER_TEMP, 'steam-content', publicationPlatform);
 
           await mkdir(path.dirname(targetRoot), { recursive: true });
           await cp(manifest.desktopWorkspace, targetRoot, { recursive: true, force: true });
