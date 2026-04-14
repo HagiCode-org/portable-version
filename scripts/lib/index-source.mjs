@@ -1,4 +1,5 @@
 import {
+  expandRequestedPlatformsForAssets,
   matchDesktopAssetForPlatform,
   matchServiceAssetForPlatform,
   stripGitRef
@@ -226,8 +227,9 @@ export function mapIndexAssetsByPlatform({ sourceType, versionEntry, platforms }
   const matcher = sourceType === 'desktop' ? matchDesktopAssetForPlatform : matchServiceAssetForPlatform;
   const sourceLabel = sourceType === 'desktop' ? 'Desktop' : 'Service';
   const assetsByPlatform = {};
+  const assetPlatforms = expandRequestedPlatformsForAssets(platforms, sourceType);
 
-  for (const platformId of platforms) {
+  for (const platformId of assetPlatforms) {
     const matchedAsset = ensureAddressableAsset(
       matcher(allAssets, platformId),
       platformId,
