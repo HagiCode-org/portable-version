@@ -6,29 +6,52 @@ Portable builds also bundle a pinned Node.js runtime and a preinstalled OpenSpec
 
 ## Trigger modes
 
-The main workflow is `.github/workflows/portable-version-build.yml`.
+Packaging and Steam publication now use separate workflows:
 
-It supports three non-interactive entrypoints:
+- `.github/workflows/portable-version-build.yml` (`portable-version-release`) handles build-plan resolution, packaging, and GitHub Release publication.
+- `.github/workflows/portable-version-steam-release.yml` (`portable-version-steam-release`) manually publishes an existing Portable Version release to Steam.
+
+The release workflow supports three non-interactive entrypoints:
 
 - `schedule` polls the Desktop and Server index manifests on a daily cadence.
-- `workflow_dispatch` supports targeted rebuilds with optional Desktop selector, service selector, platform, dry-run, Steam publication, and force-rebuild inputs.
+- `workflow_dispatch` supports targeted rebuilds with optional Desktop selector, service selector, platform, dry-run, and force-rebuild inputs.
 - `repository_dispatch` accepts `client_payload` fields (`desktopTag`, `serviceTag`, `platforms`, `forceRebuild`, `dryRun`) and still requires both selectors so the automation stays non-interactive.
+
+The Steam workflow is `workflow_dispatch` only and requires an explicit `release` tag for every run.
 
 ## Workflow inputs
 
-`workflow_dispatch` accepts these inputs:
+### Portable Version release workflow
+
+`portable-version-release` accepts these `workflow_dispatch` inputs:
 
 - `desktop_tag`: optional Desktop version selector. `refs/tags/v0.1.34`, `v0.1.34`, and `0.1.34` are normalized to the same selector.
-- `service_tag`: optional Server version selector. `refs/tags/v0.1.0-beta.35`, `v0.1.0-beta.35`, and `0.1.0-beta.35` are normalized to the same selector.
-- `platforms`: comma-separated platforms. Supported values are `linux-x64`, `win-x64`, `osx-x64`, `osx-arm64`, or `all`.
+- `service_tag`: optional Server version selector. `refs/tags/v0.1.0-beta.35`, `v0.1.0-beta.35`, and `0.1.0-beta.35` are normalized to the same selector. In the release-tag convention described below, this current service payload version is treated as the "Web" component.
+- `platforms`: comma-separated platforms. Supported values are `linux-x64`, `win-x64`, `osx-universal`, `osx-x64`, `osx-arm64`, or `all`.
 - `force_rebuild`: keep packaging even if the derived Portable Version release already exists.
 - `dry_run`: skip GitHub Release publication while still resolving, staging, and packaging.
-- `publish_to_steam`: after the GitHub Release job completes, upload the unpacked platform contents to Steam.
+
+When no selector is provided, the build plan resolves the latest indexed Desktop version and the latest indexed Server version.
+
+### Steam publication workflow
+
+`portable-version-steam-release` accepts these `workflow_dispatch` inputs:
+
+- `release`: required Portable Version release tag to hydrate and publish to Steam. The workflow does not infer "latest".
 - `steam_preview`: generate a Steam preview build instead of publishing a live Steam update. This defaults to `true` for safer first runs.
 - `steam_branch`: optional Steam branch to set live. Leave empty to upload without changing the live branch.
 - `steam_description`: optional Steam build description override.
 
-When no selector is provided, the build plan resolves the latest indexed Desktop version and the latest indexed Server version.
+## Release tag convention
+
+Portable Version releases now use a readable concatenated tag instead of the old hashed `pv-release-*` namespace:
+
+- canonical format: `<web-tag>-<desktop-tag>`
+- current mapping: `web-tag` means the selected `service_tag` / `PCode.Web` payload version
+- normalization rule: `refs/tags/v0.1.0-beta.35`, `v0.1.0-beta.35`, and `0.1.0-beta.35` all normalize to `v0.1.0-beta.35`
+- example: `service_tag=0.1.0-beta.35` plus `desktop_tag=refs/tags/v0.1.34` produces `v0.1.0-beta.35-v0.1.34`
+
+The same concatenated tag is reused for duplicate detection, workflow outputs, GitHub Release titles, release notes, and dry-run metadata filenames.
 
 ## Data sources and download model
 
@@ -53,7 +76,7 @@ Recommended repository secrets:
 - `PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL`: Desktop Azure Blob container SAS URL with at least `Read` and `List` permissions. Example shape: `https://<account>.blob.core.windows.net/<desktop-container>?<sas-token>`.
 - `PORTABLE_VERSION_SERVICE_AZURE_SAS_URL`: Server Azure Blob container SAS URL with at least `Read` and `List` permissions. Example shape: `https://<account>.blob.core.windows.net/<service-container>?<sas-token>`.
 
-Steam publication uses these additional repository secrets:
+Steam publication uses these additional repository secrets in `portable-version-steam-release`:
 
 - `STEAM_APP_ID`: Steam app id for the Desktop product.
 - `STEAM_DEPOT_ID_LINUX`: depot id for Linux builds.
@@ -67,8 +90,8 @@ Steam publication uses these additional repository secrets:
 
 Workflow permissions are set to:
 
-- `contents: write`
-- `actions: read`
+- `portable-version-release`: `contents: write`, `actions: read`
+- `portable-version-steam-release`: `contents: read`
 
 ## Build assumptions
 
@@ -84,16 +107,21 @@ The automation currently assumes:
 
 ## Steam publication flow
 
-Steam uploads reuse the unpacked application directory produced during packaging instead of the final zipped release asset. When `publish_to_steam=true` on `workflow_dispatch`, each packaging job uploads a `steam-content-<platform>` artifact, and the `publish_steam` job then:
+Steam publication now hydrates its input from an existing Portable Version GitHub Release instead of depending on package-job artifacts from the release workflow. `portable-version-steam-release` now:
 
-- downloads the unpacked app contents for every requested platform
-- installs `steamcmd` on `ubuntu-latest`
-- generates app and depot VDF scripts under `steam-build/scripts/`
-- logs in with `STEAM_USERNAME` and `STEAM_PASSWORD`
-- derives a Steam Guard code from `STEAM_SHARED_SECRET` when available, otherwise uses `STEAM_GUARD_CODE` if provided
-- runs `steamcmd +run_app_build` in preview or publish mode
+1. validates the required `release` input against `HagiCode-org/portable-version`
+2. downloads `<release>.build-manifest.json` and `<release>.artifact-inventory.json`
+3. downloads each published Portable Version archive referenced by the merged inventory
+4. reconstructs `steam-content/<platform>` from those archives, reusing `steam-content/osx-universal` for both macOS depots
+5. installs `steamcmd` on `ubuntu-latest`
+6. generates app and depot VDF scripts under `steam-build/scripts/`
+7. logs in with `STEAM_USERNAME` and `STEAM_PASSWORD`
+8. derives a Steam Guard code from `STEAM_SHARED_SECRET` when available, otherwise uses `STEAM_GUARD_CODE` if provided
+9. runs `steamcmd +run_app_build` in preview or publish mode
 
-`steam_preview=true` keeps the Steam upload in preview mode so you can validate depot mappings and authentication without pushing a live update. Once the preview run succeeds, re-run with `steam_preview=false` and optionally set `steam_branch` if you want the build to go live on a specific branch.
+`steam_preview=true` keeps the Steam upload in preview mode so you can validate depot mappings and authentication without pushing a live update. Once the preview run succeeds, re-run `portable-version-steam-release` with `steam_preview=false` and optionally set `steam_branch` if you want the build to go live on a specific branch.
+
+If the selected release is missing the build manifest, merged artifact inventory, or one of the published platform archives, the workflow fails before any Steam login happens. That usually means the release predates the current Portable Version publication metadata contract and should be rebuilt first.
 
 ## Local verification
 
@@ -138,16 +166,18 @@ Use these recovery paths when a workflow run fails or must be replayed:
 2. If the derived Portable Version release already exists but the prior upload was partial, re-run with `force_rebuild=true`.
 3. If a specific upstream pair must be replayed, supply explicit `desktop_tag` and `service_tag` selectors.
 4. Inspect the uploaded workflow artifacts:
-   - `build-plan`
-   - `portable-package-<platform>`
-   - `release-metadata-<release-tag>`
-5. Review the workflow summary for the exact selector mismatch, missing indexed asset, SAS download failure, or publication error.
+   - `portable-release-build-plan`
+   - `portable-release-package-<platform>`
+   - `portable-release-metadata-<release-tag>`
+   - `portable-steam-release-preparation-<release-tag>`
+   - `portable-steam-build-metadata-<release-tag>`
+5. Review the workflow summary for the exact selector mismatch, missing indexed asset, release hydration failure, Steam authentication issue, or publication error.
 
 ## Derived release outputs
 
 Each successful build publishes:
 
-- one deterministic Portable Version tag in the `pv-release-<hash>` namespace
+- one deterministic Portable Version tag in the `<web-tag>-<desktop-tag>` namespace
 - repacked Desktop artifacts copied to deterministic asset names such as `hagicode-portable-linux-x64.zip`
 - the normalized build manifest
 - merged artifact inventory metadata
