@@ -1,0 +1,128 @@
+name: portable-version-steam-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Portable Version release tag to publish to Steam (for example v0.1.0-beta.35-v0.1.34).'
+        required: true
+        type: string
+      steam_preview:
+        description: 'Generate a Steam preview build instead of publishing a live Steam update.'
+        required: false
+        default: true
+        type: boolean
+      steam_branch:
+        description: 'Optional Steam branch to set live. Leave empty to avoid changing the live branch.'
+        required: false
+        default: ''
+        type: string
+      steam_description:
+        description: 'Optional Steam build description override.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-version-steam-${{ github.event.inputs.release }}
+  cancel-in-progress: false
+
+env:
+  PORTABLE_VERSION_GITHUB_TOKEN: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
+
+jobs:
+  publish_steam:
+    name: Publish Steam build for ${{ inputs.release }}
+    runs-on: ubuntu-latest
+    env:
+      STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+      STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+      STEAM_SHARED_SECRET: ${{ secrets.STEAM_SHARED_SECRET }}
+      STEAM_GUARD_CODE: ${{ secrets.STEAM_GUARD_CODE }}
+    steps:
+      - name: Checkout portable-version
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Prepare Steam release hydration input
+        working-directory: .
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+        run: |
+          node scripts/prepare-steam-release-input.mjs \
+            --release "${{ github.event.inputs.release }}" \
+            --output-dir "$RUNNER_TEMP/portable-steam-release"
+
+      - name: Upload Steam release preparation metadata
+        uses: actions/upload-artifact@v6
+        with:
+          name: portable-steam-release-preparation-${{ github.event.inputs.release }}
+          path: ${{ runner.temp }}/portable-steam-release/metadata
+          if-no-files-found: error
+
+      - name: Install SteamCMD
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/steamcmd"
+          curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C "$RUNNER_TEMP/steamcmd"
+
+      - name: Publish Steam build
+        working-directory: .
+        shell: bash
+        env:
+          STEAM_APP_ID: ${{ secrets.STEAM_APP_ID }}
+          STEAM_DEPOT_ID_LINUX: ${{ secrets.STEAM_DEPOT_ID_LINUX }}
+          STEAM_DEPOT_ID_WINDOWS: ${{ secrets.STEAM_DEPOT_ID_WINDOWS }}
+          STEAM_DEPOT_ID_MACOS_X64: ${{ secrets.STEAM_DEPOT_ID_MACOS_X64 }}
+          STEAM_DEPOT_ID_MACOS_ARM64: ${{ secrets.STEAM_DEPOT_ID_MACOS_ARM64 }}
+          STEAMCMD_PATH: ${{ runner.temp }}/steamcmd/steamcmd.sh
+          STEAM_BRANCH_INPUT: ${{ github.event.inputs.steam_branch }}
+          STEAM_DESCRIPTION_INPUT: ${{ github.event.inputs.steam_description }}
+          STEAM_PREVIEW_INPUT: ${{ github.event.inputs.steam_preview }}
+        run: |
+          cmd=(
+            node scripts/publish-steam.mjs
+            --plan "$RUNNER_TEMP/portable-steam-release/metadata/${{ github.event.inputs.release }}.build-manifest.json"
+            --content-root "$RUNNER_TEMP/portable-steam-release/steam-content"
+            --output-dir "$RUNNER_TEMP/portable-steam-build"
+            --app-id "$STEAM_APP_ID"
+          )
+
+          if [ -n "$STEAM_DEPOT_ID_LINUX" ]; then
+            cmd+=(--linux-depot-id "$STEAM_DEPOT_ID_LINUX")
+          fi
+          if [ -n "$STEAM_DEPOT_ID_WINDOWS" ]; then
+            cmd+=(--windows-depot-id "$STEAM_DEPOT_ID_WINDOWS")
+          fi
+          if [ -n "$STEAM_DEPOT_ID_MACOS_X64" ]; then
+            cmd+=(--macos-x64-depot-id "$STEAM_DEPOT_ID_MACOS_X64")
+          fi
+          if [ -n "$STEAM_DEPOT_ID_MACOS_ARM64" ]; then
+            cmd+=(--macos-arm64-depot-id "$STEAM_DEPOT_ID_MACOS_ARM64")
+          fi
+          if [ -n "$STEAM_BRANCH_INPUT" ]; then
+            cmd+=(--branch "$STEAM_BRANCH_INPUT")
+          fi
+          if [ -n "$STEAM_DESCRIPTION_INPUT" ]; then
+            cmd+=(--description "$STEAM_DESCRIPTION_INPUT")
+          fi
+          if [ "$STEAM_PREVIEW_INPUT" = 'true' ]; then
+            cmd+=(--preview)
+          fi
+
+          "${cmd[@]}"
+
+      - name: Upload Steam build metadata
+        uses: actions/upload-artifact@v6
+        with:
+          name: portable-steam-build-metadata-${{ github.event.inputs.release }}
+          path: ${{ runner.temp }}/portable-steam-build
+          if-no-files-found: error
