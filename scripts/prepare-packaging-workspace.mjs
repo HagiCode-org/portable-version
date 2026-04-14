@@ -12,7 +12,7 @@ import {
   writeJson
 } from './lib/fs-utils.mjs';
 import { annotateError, appendSummary } from './lib/summary.mjs';
-import { getPlatformConfig } from './lib/platforms.mjs';
+import { getPlatformConfig, getRequestedAssetPlatforms } from './lib/platforms.mjs';
 import { resolveToolchainRoots } from './lib/toolchain.mjs';
 
 async function directoryContainsPortableRoot(rootPath, portableFixedSegments) {
@@ -62,9 +62,10 @@ async function main() {
   const platformId = values.platform;
   const plan = await readJson(planPath);
   const platform = getPlatformConfig(platformId);
-  const desktopAsset = plan.upstream.desktop.assetsByPlatform?.[platformId];
+  const [desktopAssetPlatform] = getRequestedAssetPlatforms(platformId, 'desktop');
+  const desktopAsset = plan.upstream.desktop.assetsByPlatform?.[desktopAssetPlatform];
   if (!desktopAsset) {
-    throw new Error(`No Desktop asset mapped for platform ${platformId}.`);
+    throw new Error(`No Desktop asset mapped for platform ${platformId} (source platform ${desktopAssetPlatform}).`);
   }
 
   const azureSasUrl =
@@ -111,10 +112,12 @@ async function main() {
     extractDirectory,
     outputDirectory,
     desktopVersion: plan.upstream.desktop.version,
+    desktopAssetPlatform,
     desktopAssetName: desktopAsset.name,
     desktopAssetPath: desktopAsset.path,
     desktopArchivePath,
     desktopDownloadSource: sanitizeUrlForLogs(assetSource),
+    bundle: platform.bundle ?? null,
     toolchainRoot: toolchainRoots.toolchainRoot,
     toolchainBinRoot: toolchainRoots.toolchainBinRoot,
     toolchainManifestPath: toolchainRoots.toolchainManifestPath,
@@ -127,6 +130,7 @@ async function main() {
     `### Workspace prepared for ${platform.id}`,
     `- Desktop version: ${plan.upstream.desktop.version}`,
     `- Desktop asset: ${desktopAsset.name}`,
+    `- Desktop asset platform: ${desktopAssetPlatform}`,
     `- Download source: ${sanitizeUrlForLogs(assetSource)}`,
     `- Workspace: ${workspacePath}`,
     `- Portable root: ${portableFixedRoot}`
