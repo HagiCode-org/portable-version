@@ -2,7 +2,7 @@ import path from 'node:path';
 import { chmod } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { readJson } from './fs-utils.mjs';
-import { getPlatformConfig } from './platforms.mjs';
+import { getPlatformConfig, getRequestedAssetPlatforms } from './platforms.mjs';
 
 const DEFAULT_CONFIG_URL = new URL('../../config/portable-toolchain.json', import.meta.url);
 
@@ -15,6 +15,14 @@ export async function readPortableToolchainConfig(configPath = DEFAULT_TOOLCHAIN
 export function resolvePortableToolchainPlatform(config, platformId) {
   const entry = config?.node?.platforms?.[platformId];
   if (!entry) {
+    const [fallbackPlatformId] = getRequestedAssetPlatforms(platformId, 'desktop');
+    if (fallbackPlatformId && fallbackPlatformId !== platformId) {
+      const fallbackEntry = config?.node?.platforms?.[fallbackPlatformId];
+      if (fallbackEntry) {
+        return fallbackEntry;
+      }
+    }
+
     throw new Error(`Portable toolchain config is missing platform entry: ${platformId}`);
   }
   return entry;
