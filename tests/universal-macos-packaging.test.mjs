@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { createArchive, validateZipPaths } from '../scripts/lib/archive.mjs';
 import { runCommand } from '../scripts/lib/command.mjs';
 import { readJson, writeJson } from '../scripts/lib/fs-utils.mjs';
 import { createMockPortableToolchainConfig } from './helpers/portable-toolchain-fixture.mjs';
@@ -12,7 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
 async function createFixtureArchive(sourceDirectory, archivePath) {
-  await runCommand('zip', ['-qr', archivePath, '.'], { cwd: sourceDirectory });
+  await createArchive(sourceDirectory, archivePath);
 }
 
 async function createPortableRuntimeArchive(tempRoot, platformId) {
@@ -191,17 +192,17 @@ test('universal macOS packaging writes bundle metadata and preserves both payloa
   assert.deepEqual(inventory.artifacts[0].bundledPlatforms, ['osx-x64', 'osx-arm64']);
   assert.equal(inventory.artifacts[0].fileName, 'hagicode-portable-osx-universal.zip');
 
-  const archiveListing = await runCommand('unzip', ['-Z1', inventory.artifacts[0].outputPath], { stdio: 'pipe' });
+  const archiveListing = (await validateZipPaths(inventory.artifacts[0].outputPath)).join('\n');
   assert.match(
-    archiveListing.stdout,
+    archiveListing,
     /Hagicode Desktop\.app\/Contents\/Resources\/extra\/portable-fixed\/current\/bundle-manifest\.json/
   );
   assert.match(
-    archiveListing.stdout,
+    archiveListing,
     /Hagicode Desktop\.app\/Contents\/Resources\/extra\/portable-fixed\/current\/osx-x64\/manifest\.json/
   );
   assert.match(
-    archiveListing.stdout,
+    archiveListing,
     /Hagicode Desktop\.app\/Contents\/Resources\/extra\/portable-fixed\/current\/osx-arm64\/manifest\.json/
   );
 });

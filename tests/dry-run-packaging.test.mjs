@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { createArchive, validateZipPaths } from '../scripts/lib/archive.mjs';
 import { runCommand } from '../scripts/lib/command.mjs';
 import { readJson, writeJson } from '../scripts/lib/fs-utils.mjs';
 import { createMockPortableToolchainConfig } from './helpers/portable-toolchain-fixture.mjs';
@@ -16,7 +17,7 @@ function fixturePath(...segments) {
 }
 
 async function createFixtureArchive(sourceDirectory, archivePath) {
-  await runCommand('zip', ['-qr', archivePath, '.'], { cwd: sourceDirectory });
+  await createArchive(sourceDirectory, archivePath);
 }
 
 test('dry-run packaging stages payload and emits inventory metadata', async () => {
@@ -146,8 +147,8 @@ test('dry-run packaging stages payload and emits inventory metadata', async () =
   assert.match(inventory.toolchainValidationPath, /toolchain-validation-linux-x64\.json$/);
 
   const packagedArchivePath = inventory.artifacts[0].outputPath;
-  const archiveListing = await runCommand('unzip', ['-Z1', packagedArchivePath], { stdio: 'pipe' });
-  assert.match(archiveListing.stdout, /resources\/extra\/portable-fixed\/toolchain\/toolchain-manifest\.json/);
-  assert.match(archiveListing.stdout, /resources\/extra\/portable-fixed\/toolchain\/bin\/openspec/);
-  assert.match(archiveListing.stdout, /resources\/extra\/portable-fixed\/toolchain\/env\/activate\.sh/);
+  const archiveListing = (await validateZipPaths(packagedArchivePath)).join('\n');
+  assert.match(archiveListing, /resources\/extra\/portable-fixed\/toolchain\/toolchain-manifest\.json/);
+  assert.match(archiveListing, /resources\/extra\/portable-fixed\/toolchain\/bin\/openspec/);
+  assert.match(archiveListing, /resources\/extra\/portable-fixed\/toolchain\/env\/activate\.sh/);
 });

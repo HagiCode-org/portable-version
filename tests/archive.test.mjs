@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createArchive, validateZipPaths } from '../scripts/lib/archive.mjs';
+import { buildWindowsZipArchiveScript, createArchive, validateZipPaths } from '../scripts/lib/archive.mjs';
 
 async function createArchiveFixture(tempRoot) {
   const sourceRoot = path.join(tempRoot, 'source');
@@ -59,4 +59,19 @@ test('validateZipPaths rejects ZIP entries that contain backslashes', async () =
   await replaceArchiveEntryPath(archivePath, 'nested/file.txt', 'nested\\file.txt');
 
   await assert.rejects(() => validateZipPaths(archivePath), /nested\\file\.txt/);
+});
+
+test('buildWindowsZipArchiveScript normalizes entry separators in the Windows ZIP fallback', () => {
+  const sourceRoot = path.join('workspace', "source's");
+  const archivePath = path.join('workspace', "portable's.zip");
+  const script = buildWindowsZipArchiveScript(sourceRoot, archivePath);
+
+  assert.match(script, /System\.IO\.Compression\.FileSystem/);
+  assert.match(script, /System\.IO\.Compression\.ZipArchive/);
+  assert.match(script, /Replace\(\[char\]92, \[char\]47\)/);
+  assert.match(script, /CreateEntry\(\$relativePath/);
+  assert.match(script, /\$sourceDirectory = '.+'/);
+  assert.match(script, /\$destinationArchive = '.+'/);
+  assert.ok(script.includes("source''s"));
+  assert.ok(script.includes("portable''s.zip"));
 });

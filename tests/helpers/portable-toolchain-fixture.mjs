@@ -1,14 +1,14 @@
 import os from 'node:os';
 import path from 'node:path';
 import { chmod, mkdir, mkdtemp, rename, writeFile } from 'node:fs/promises';
+import { createArchive as createPortableArchive } from '../../scripts/lib/archive.mjs';
 import { runCommand } from '../../scripts/lib/command.mjs';
 import { sha256File } from '../../scripts/lib/checksum.mjs';
 import { writeJson } from '../../scripts/lib/fs-utils.mjs';
 
 async function createArchive(sourceDirectory, destinationPath) {
   if (destinationPath.endsWith('.zip')) {
-    await runCommand('zip', ['-qr', destinationPath, '.'], { cwd: sourceDirectory });
-    return destinationPath;
+    return createPortableArchive(sourceDirectory, destinationPath);
   }
 
   await runCommand('tar', ['-czf', destinationPath, path.basename(sourceDirectory)], {
