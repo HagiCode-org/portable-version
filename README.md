@@ -38,8 +38,8 @@ When no selector is provided, the build plan resolves the latest indexed Desktop
 `portable-version-steam-release` accepts these `workflow_dispatch` inputs:
 
 - `release`: required Portable Version release tag to hydrate and publish to Steam. The workflow does not infer "latest".
-- `steam_preview`: generate a Steam preview build instead of publishing a live Steam update. This defaults to `true` for safer first runs.
-- `steam_branch`: optional Steam branch to set live. Leave empty to upload without changing the live branch.
+- `steam_preview`: generate a Steam preview build instead of publishing and setting the beta branch live. This defaults to `false`.
+- `steam_branch`: Steam branch to set live for non-preview uploads. This defaults to `beta`.
 - `steam_description`: optional Steam build description override.
 
 ## Release tag convention
@@ -124,7 +124,7 @@ Steam publication now hydrates its input from an existing Portable Version GitHu
 8. derives a Steam Guard code from `STEAM_SHARED_SECRET` when available, otherwise uses `STEAM_GUARD_CODE` if provided
 9. runs `steamcmd +run_app_build` in preview or publish mode
 
-`steam_preview=true` keeps the Steam upload in preview mode so you can validate depot mappings and authentication without pushing a live update. Once the preview run succeeds, re-run `portable-version-steam-release` with `steam_preview=false` and optionally set `steam_branch` if you want the build to go live on a specific branch.
+`steam_preview=false` is now the default path and uploads the build while setting `beta` live unless you override `steam_branch`. `steam_preview=true` keeps the Steam upload in preview mode so you can validate depot mappings and authentication without pushing a live update; preview runs do not pass `setlive` even if `steam_branch` is populated.
 
 If the selected release is missing the build manifest, merged artifact inventory, or one of the published platform archives, the workflow fails before any Steam login happens. That usually means the release predates the current Portable Version publication metadata contract and should be rebuilt first.
 

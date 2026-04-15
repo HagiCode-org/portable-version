@@ -8,14 +8,14 @@ on:
         required: true
         type: string
       steam_preview:
-        description: 'Generate a Steam preview build instead of publishing a live Steam update.'
+        description: 'Generate a Steam preview build instead of publishing and setting the beta branch live.'
         required: false
-        default: true
+        default: false
         type: boolean
       steam_branch:
-        description: 'Optional Steam branch to set live. Leave empty to avoid changing the live branch.'
+        description: 'Steam branch to set live for non-preview uploads.'
         required: false
-        default: ''
+        default: 'beta'
         type: string
       steam_description:
         description: 'Optional Steam build description override.'
@@ -115,7 +115,7 @@ jobs:
           if [ -n "$STEAM_DEPOT_ID_MACOS" ]; then
             cmd+=(--macos-depot-id "$STEAM_DEPOT_ID_MACOS")
           fi
-          if [ -n "$STEAM_BRANCH_INPUT" ]; then
+          if [ "$STEAM_PREVIEW_INPUT" != 'true' ] && [ -n "$STEAM_BRANCH_INPUT" ]; then
             cmd+=(--branch "$STEAM_BRANCH_INPUT")
           fi
           if [ -n "$STEAM_DESCRIPTION_INPUT" ]; then
