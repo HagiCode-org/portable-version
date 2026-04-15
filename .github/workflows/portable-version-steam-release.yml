@@ -35,7 +35,11 @@ env:
 jobs:
   publish_steam:
     name: Publish Steam build for ${{ inputs.release }}
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - steam
     env:
       STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
       STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}

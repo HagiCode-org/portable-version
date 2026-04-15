@@ -93,6 +93,8 @@ Workflow permissions are set to:
 - `portable-version-release`: `contents: write`, `actions: read`
 - `portable-version-steam-release`: `contents: read`
 
+The Steam workflow is pinned to a dedicated self-hosted runner with labels `self-hosted`, `Linux`, `X64`, and `steam` (for example a Red Hat host prepared for SteamCMD uploads).
+
 ## Build assumptions
 
 The automation currently assumes:
@@ -113,7 +115,7 @@ Steam publication now hydrates its input from an existing Portable Version GitHu
 2. downloads `<release>.build-manifest.json` and `<release>.artifact-inventory.json`
 3. downloads each published Portable Version archive referenced by the merged inventory
 4. reconstructs `steam-content/<platform>` from those archives, reusing `steam-content/osx-universal` for both macOS depots
-5. installs `steamcmd` on `ubuntu-latest`
+5. installs `steamcmd` on the dedicated self-hosted `self-hosted`/`Linux`/`X64`/`steam` runner
 6. generates app and depot VDF scripts under `steam-build/scripts/`
 7. logs in with `STEAM_USERNAME` and `STEAM_PASSWORD`
 8. derives a Steam Guard code from `STEAM_SHARED_SECRET` when available, otherwise uses `STEAM_GUARD_CODE` if provided
