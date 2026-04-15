@@ -10,12 +10,10 @@ import { annotateError, appendSummary } from './lib/summary.mjs';
 
 const STEAM_GUARD_ALPHABET = '23456789BCDFGHJKMNPQRTVWXY';
 const UNIFIED_MACOS_CONTENT_PLATFORM = 'osx-universal';
-const MACOS_PLATFORM_IDS = new Set(['osx-x64', 'osx-arm64']);
 const PLATFORM_OPTIONS = [
-  { id: 'linux-x64', cliOption: 'linux-depot-id' },
-  { id: 'win-x64', cliOption: 'windows-depot-id' },
-  { id: 'osx-x64', cliOption: 'macos-x64-depot-id' },
-  { id: 'osx-arm64', cliOption: 'macos-arm64-depot-id' }
+  { id: 'linux-x64', cliOption: 'linux-depot-id', contentPlatforms: ['linux-x64'] },
+  { id: 'win-x64', cliOption: 'windows-depot-id', contentPlatforms: ['win-x64'] },
+  { id: 'macos', cliOption: 'macos-depot-id', contentPlatforms: [UNIFIED_MACOS_CONTENT_PLATFORM, 'osx-x64', 'osx-arm64'] }
 ];
 
 function escapeVdf(value) {
@@ -105,24 +103,41 @@ async function resolveDepotDefinitions(options, contentRoot) {
       continue;
     }
 
-    let platformContentRoot = path.join(contentRoot, platform.id);
-    let sourcePlatform = platform.id;
-    if (!(await pathExists(platformContentRoot)) && MACOS_PLATFORM_IDS.has(platform.id)) {
-      const universalRoot = path.join(contentRoot, UNIFIED_MACOS_CONTENT_PLATFORM);
-      if (await pathExists(universalRoot)) {
-        platformContentRoot = universalRoot;
-        sourcePlatform = UNIFIED_MACOS_CONTENT_PLATFORM;
+    const contentMatches = [];
+    for (const candidatePlatform of platform.contentPlatforms) {
+      const candidateRoot = path.join(contentRoot, candidatePlatform);
+      if (await pathExists(candidateRoot)) {
+        contentMatches.push({
+          sourcePlatform: candidatePlatform,
+          contentRoot: candidateRoot
+        });
       }
     }
-    if (!(await pathExists(platformContentRoot))) {
-      throw new Error(`Steam content for ${platform.id} is missing at ${platformContentRoot}.`);
+
+    if (contentMatches.length === 0) {
+      throw new Error(`Steam content for ${platform.id} is missing under ${contentRoot}.`);
+    }
+
+    let selectedMatch = contentMatches[0];
+    if (platform.id === 'macos' && contentMatches.length > 1) {
+      const universalMatch = contentMatches.find(
+        (candidate) => candidate.sourcePlatform === UNIFIED_MACOS_CONTENT_PLATFORM
+      );
+      if (!universalMatch) {
+        throw new Error(
+          `Steam content for macos is ambiguous under ${contentRoot}; found ${contentMatches
+            .map((candidate) => candidate.sourcePlatform)
+            .join(', ')} without ${UNIFIED_MACOS_CONTENT_PLATFORM}.`
+        );
+      }
+      selectedMatch = universalMatch;
     }
 
     depotDefinitions.push({
       depotId,
       platform: platform.id,
-      sourcePlatform,
-      contentRoot: platformContentRoot,
+      sourcePlatform: selectedMatch.sourcePlatform,
+      contentRoot: selectedMatch.contentRoot,
       fileName: `depot-build-${platform.id}.vdf`
     });
   }
@@ -146,8 +161,7 @@ async function main() {
       description: { type: 'string' },
       'linux-depot-id': { type: 'string' },
       'windows-depot-id': { type: 'string' },
-      'macos-x64-depot-id': { type: 'string' },
-      'macos-arm64-depot-id': { type: 'string' },
+      'macos-depot-id': { type: 'string' },
       preview: { type: 'boolean', default: false },
       'force-dry-run': { type: 'boolean', default: false }
     },

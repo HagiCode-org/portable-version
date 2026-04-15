@@ -85,8 +85,7 @@ jobs:
           STEAM_APP_ID: ${{ secrets.STEAM_APP_ID }}
           STEAM_DEPOT_ID_LINUX: ${{ secrets.STEAM_DEPOT_ID_LINUX }}
           STEAM_DEPOT_ID_WINDOWS: ${{ secrets.STEAM_DEPOT_ID_WINDOWS }}
-          STEAM_DEPOT_ID_MACOS_X64: ${{ secrets.STEAM_DEPOT_ID_MACOS_X64 }}
-          STEAM_DEPOT_ID_MACOS_ARM64: ${{ secrets.STEAM_DEPOT_ID_MACOS_ARM64 }}
+          STEAM_DEPOT_ID_MACOS: ${{ secrets.STEAM_DEPOT_ID_MACOS }}
           STEAMCMD_PATH: ${{ runner.temp }}/steamcmd/steamcmd.sh
           STEAM_BRANCH_INPUT: ${{ github.event.inputs.steam_branch }}
           STEAM_DESCRIPTION_INPUT: ${{ github.event.inputs.steam_description }}
@@ -106,11 +105,8 @@ jobs:
           if [ -n "$STEAM_DEPOT_ID_WINDOWS" ]; then
             cmd+=(--windows-depot-id "$STEAM_DEPOT_ID_WINDOWS")
           fi
-          if [ -n "$STEAM_DEPOT_ID_MACOS_X64" ]; then
-            cmd+=(--macos-x64-depot-id "$STEAM_DEPOT_ID_MACOS_X64")
-          fi
-          if [ -n "$STEAM_DEPOT_ID_MACOS_ARM64" ]; then
-            cmd+=(--macos-arm64-depot-id "$STEAM_DEPOT_ID_MACOS_ARM64")
+          if [ -n "$STEAM_DEPOT_ID_MACOS" ]; then
+            cmd+=(--macos-depot-id "$STEAM_DEPOT_ID_MACOS")
           fi
           if [ -n "$STEAM_BRANCH_INPUT" ]; then
             cmd+=(--branch "$STEAM_BRANCH_INPUT")

@@ -175,10 +175,8 @@ test('prepare-steam-release-input hydrates published archives for standalone Ste
     '7654321',
     '--linux-depot-id',
     '7654322',
-    '--macos-x64-depot-id',
+    '--macos-depot-id',
     '7654323',
-    '--macos-arm64-depot-id',
-    '7654324',
     '--branch',
     'candidate',
     '--preview',
@@ -188,14 +186,14 @@ test('prepare-steam-release-input hydrates published archives for standalone Ste
   const manifest = await readJson(path.join(steamBuildOutput, 'steam-build-manifest.json'));
   assert.equal(manifest.preview, true);
   assert.equal(manifest.branch, 'candidate');
-  assert.equal(manifest.depots.length, 3);
+  assert.equal(manifest.depots.length, 2);
   assert.equal(manifest.planPath, hydration.buildManifestPath);
   assert.equal(manifest.contentRoot, hydration.contentRoot);
+  assert.equal(manifest.depots[1].platform, 'macos');
   assert.equal(manifest.depots[1].sourcePlatform, 'osx-universal');
-  assert.equal(manifest.depots[2].sourcePlatform, 'osx-universal');
 });
 
-test('publish-steam reuses one universal macOS content root for both mac depots', async () => {
+test('publish-steam uses one unified macOS depot backed by universal content', async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'portable-version-steam-macos-'));
   const planPath = path.join(tempRoot, 'build-plan.json');
   const contentRoot = path.join(tempRoot, 'steam-content');
@@ -224,22 +222,18 @@ test('publish-steam reuses one universal macOS content root for both mac depots'
     outputDir,
     '--app-id',
     '7654321',
-    '--macos-x64-depot-id',
+    '--macos-depot-id',
     '7654322',
-    '--macos-arm64-depot-id',
-    '7654323',
     '--force-dry-run'
   ]);
 
   const manifest = await readJson(path.join(outputDir, 'steam-build-manifest.json'));
-  const x64Depot = await readFile(path.join(outputDir, 'scripts', 'depot-build-osx-x64.vdf'), 'utf8');
-  const arm64Depot = await readFile(path.join(outputDir, 'scripts', 'depot-build-osx-arm64.vdf'), 'utf8');
+  const macosDepot = await readFile(path.join(outputDir, 'scripts', 'depot-build-macos.vdf'), 'utf8');
 
-  assert.equal(manifest.depots.length, 2);
+  assert.equal(manifest.depots.length, 1);
+  assert.equal(manifest.depots[0].platform, 'macos');
   assert.equal(manifest.depots[0].sourcePlatform, 'osx-universal');
-  assert.equal(manifest.depots[1].sourcePlatform, 'osx-universal');
-  assert.match(x64Depot, /osx-universal/);
-  assert.match(arm64Depot, /osx-universal/);
+  assert.match(macosDepot, /osx-universal/);
 });
 
 test('generateSteamGuardCode returns the expected length', () => {

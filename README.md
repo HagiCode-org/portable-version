@@ -81,8 +81,7 @@ Steam publication uses these additional repository secrets in `portable-version-
 - `STEAM_APP_ID`: Steam app id for the Desktop product.
 - `STEAM_DEPOT_ID_LINUX`: depot id for Linux builds.
 - `STEAM_DEPOT_ID_WINDOWS`: depot id for Windows builds.
-- `STEAM_DEPOT_ID_MACOS_X64`: depot id for Intel macOS builds.
-- `STEAM_DEPOT_ID_MACOS_ARM64`: depot id for Apple Silicon macOS builds.
+- `STEAM_DEPOT_ID_MACOS`: depot id for the unified macOS build.
 - `STEAM_USERNAME`: Steam build account name.
 - `STEAM_PASSWORD`: Steam build account password.
 - `STEAM_SHARED_SECRET`: optional Steam Guard shared secret for fully unattended uploads.
@@ -114,7 +113,7 @@ Steam publication now hydrates its input from an existing Portable Version GitHu
 1. validates the required `release` input against `HagiCode-org/portable-version`
 2. downloads `<release>.build-manifest.json` and `<release>.artifact-inventory.json`
 3. downloads each published Portable Version archive referenced by the merged inventory
-4. reconstructs `steam-content/<platform>` from those archives, reusing `steam-content/osx-universal` for both macOS depots
+4. reconstructs `steam-content/<platform>` from those archives, using `steam-content/osx-universal` for the unified macOS depot when available
 5. installs `steamcmd` on the dedicated self-hosted `self-hosted`/`Linux`/`X64`/`steam` runner
 6. generates app and depot VDF scripts under `steam-build/scripts/`
 7. logs in with `STEAM_USERNAME` and `STEAM_PASSWORD`
