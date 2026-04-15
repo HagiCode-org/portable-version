@@ -87,6 +87,10 @@ Steam publication uses these additional repository secrets in `portable-version-
 - `STEAM_SHARED_SECRET`: optional Steam Guard shared secret for fully unattended uploads.
 - `STEAM_GUARD_CODE`: optional fallback Steam Guard code when a shared secret is not available.
 
+Optional repository variables:
+
+- `PORTABLE_VERSION_STEAMCMD_ROOT`: absolute path on the self-hosted runner where SteamCMD and its persistent `config/config.vdf` should be stored. Defaults to `$HOME/.local/share/portable-version/steamcmd`.
+
 Workflow permissions are set to:
 
 - `portable-version-release`: `contents: write`, `actions: read`
@@ -116,13 +120,15 @@ Steam publication now hydrates its input from an existing Portable Version GitHu
 4. reconstructs `steam-content/<platform>` from those archives, using `steam-content/osx-universal` for the unified macOS depot when available
 5. installs `steamcmd` on the dedicated self-hosted `self-hosted`/`Linux`/`X64`/`steam` runner
 6. generates app and depot VDF scripts under `steam-build/scripts/`
-7. logs in with `STEAM_USERNAME` and `STEAM_PASSWORD`
+7. saves the initial SteamCMD login token under the persistent SteamCMD root and reuses that token on future runs
 8. derives a Steam Guard code from `STEAM_SHARED_SECRET` when available, otherwise uses `STEAM_GUARD_CODE` if provided
 9. runs `steamcmd +run_app_build` in preview or publish mode
 
 `steam_preview=true` keeps the Steam upload in preview mode so you can validate depot mappings and authentication without pushing a live update. Once the preview run succeeds, re-run `portable-version-steam-release` with `steam_preview=false` and optionally set `steam_branch` if you want the build to go live on a specific branch.
 
 If the selected release is missing the build manifest, merged artifact inventory, or one of the published platform archives, the workflow fails before any Steam login happens. That usually means the release predates the current Portable Version publication metadata contract and should be rebuilt first.
+
+On the first successful non-dry-run Steam publication run, the workflow performs a full SteamCMD login, runs `info`, and preserves the updated `config/config.vdf` on the self-hosted runner. Later runs reuse `+login <username>` without resending the password, which matches the SteamPipe CI/CD guidance for saved login tokens.
 
 ## Local verification
 

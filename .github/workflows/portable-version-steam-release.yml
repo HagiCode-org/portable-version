@@ -74,9 +74,16 @@ jobs:
 
       - name: Install SteamCMD
         shell: bash
+        env:
+          STEAMCMD_ROOT_INPUT: ${{ vars.PORTABLE_VERSION_STEAMCMD_ROOT }}
         run: |
-          mkdir -p "$RUNNER_TEMP/steamcmd"
-          curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C "$RUNNER_TEMP/steamcmd"
+          steamcmd_root="${STEAMCMD_ROOT_INPUT:-$HOME/.local/share/portable-version/steamcmd}"
+          mkdir -p "$steamcmd_root"
+          if [ ! -x "$steamcmd_root/steamcmd.sh" ]; then
+            curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C "$steamcmd_root"
+          fi
+          mkdir -p "$steamcmd_root/config"
+          echo "STEAMCMD_ROOT=$steamcmd_root" >> "$GITHUB_ENV"
 
       - name: Publish Steam build
         working-directory: .
@@ -86,7 +93,7 @@ jobs:
           STEAM_DEPOT_ID_LINUX: ${{ secrets.STEAM_DEPOT_ID_LINUX }}
           STEAM_DEPOT_ID_WINDOWS: ${{ secrets.STEAM_DEPOT_ID_WINDOWS }}
           STEAM_DEPOT_ID_MACOS: ${{ secrets.STEAM_DEPOT_ID_MACOS }}
-          STEAMCMD_PATH: ${{ runner.temp }}/steamcmd/steamcmd.sh
+          STEAMCMD_PATH: ${{ env.STEAMCMD_ROOT }}/steamcmd.sh
           STEAM_BRANCH_INPUT: ${{ github.event.inputs.steam_branch }}
           STEAM_DESCRIPTION_INPUT: ${{ github.event.inputs.steam_description }}
           STEAM_PREVIEW_INPUT: ${{ github.event.inputs.steam_preview }}
@@ -119,6 +126,21 @@ jobs:
           fi
 
           "${cmd[@]}"
+
+      - name: Summarize SteamCMD persistence
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## SteamCMD persistence"
+            echo "- Root: ${STEAMCMD_ROOT}"
+            echo "- Config: ${STEAMCMD_ROOT}/config/config.vdf"
+            if [ -f "${STEAMCMD_ROOT}/config/config.vdf" ]; then
+              echo "- Saved login token: present"
+            else
+              echo "- Saved login token: missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Steam build metadata
         uses: actions/upload-artifact@v6

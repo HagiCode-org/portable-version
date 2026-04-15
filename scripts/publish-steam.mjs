@@ -94,6 +94,36 @@ function buildAppVdf({ appId, description, buildOutput, depotDefinitions, previe
   return lines.join('\n');
 }
 
+function getSteamcmdRoot(steamcmdPath) {
+  return path.dirname(path.resolve(steamcmdPath));
+}
+
+function getSteamcmdConfigPath(steamcmdPath) {
+  return path.join(getSteamcmdRoot(steamcmdPath), 'config', 'config.vdf');
+}
+
+function buildSteamLoginArgs({ steamUsername, steamPassword, steamGuardCode, useSavedLogin }) {
+  if (!steamUsername) {
+    throw new Error('Steam publication requires STEAM_USERNAME.');
+  }
+
+  const loginArgs = ['+login', steamUsername];
+  if (useSavedLogin) {
+    return loginArgs;
+  }
+
+  if (!steamPassword) {
+    throw new Error('Steam publication requires STEAM_PASSWORD when no saved SteamCMD login token exists.');
+  }
+
+  loginArgs.push(steamPassword);
+  if (steamGuardCode) {
+    loginArgs.push(steamGuardCode);
+  }
+
+  return loginArgs;
+}
+
 async function resolveDepotDefinitions(options, contentRoot) {
   const depotDefinitions = [];
 
@@ -250,22 +280,40 @@ async function main() {
     throw new Error('Steam publication requires --steamcmd-path or STEAMCMD_PATH.');
   }
 
+  const steamcmdConfigPath = getSteamcmdConfigPath(steamcmdPath);
+  const hasSavedSteamLogin = await pathExists(steamcmdConfigPath);
   const steamUsername = process.env.STEAM_USERNAME;
   const steamPassword = process.env.STEAM_PASSWORD;
-  if (!steamUsername || !steamPassword) {
-    throw new Error('Steam publication requires STEAM_USERNAME and STEAM_PASSWORD.');
+  if (!steamUsername) {
+    throw new Error('Steam publication requires STEAM_USERNAME.');
+  }
+  if (!hasSavedSteamLogin && !steamPassword) {
+    throw new Error('Steam publication requires STEAM_PASSWORD when no saved SteamCMD login token exists.');
   }
 
   const steamGuardCode = process.env.STEAM_GUARD_CODE ||
     (process.env.STEAM_SHARED_SECRET ? generateSteamGuardCode(process.env.STEAM_SHARED_SECRET) : '');
 
-  const loginArgs = ['+login', steamUsername, steamPassword];
-  if (steamGuardCode) {
-    loginArgs.push(steamGuardCode);
+  if (!hasSavedSteamLogin) {
+    await runCommand(steamcmdPath, [
+      ...buildSteamLoginArgs({
+        steamUsername,
+        steamPassword,
+        steamGuardCode,
+        useSavedLogin: false
+      }),
+      '+info',
+      '+quit'
+    ]);
   }
 
   await runCommand(steamcmdPath, [
-    ...loginArgs,
+    ...buildSteamLoginArgs({
+      steamUsername,
+      steamPassword,
+      steamGuardCode,
+      useSavedLogin: true
+    }),
     '+run_app_build',
     appBuildPath,
     '+quit'
@@ -278,6 +326,8 @@ async function main() {
     `- Preview mode: ${preview ? 'enabled' : 'disabled'}`,
     `- Depot count: ${depotDefinitions.length}`,
     `- Depot platforms: ${depotDefinitions.map((depot) => depot.platform).join(', ')}`,
+    `- Steam login mode: ${hasSavedSteamLogin ? 'reused saved SteamCMD token' : 'bootstrapped and saved new SteamCMD token'}`,
+    `- SteamCMD config: ${steamcmdConfigPath}`,
     `- Content root: ${contentRoot}`,
     `- App build script: ${appBuildPath}`
   ]);
@@ -299,4 +349,11 @@ if (isDirectExecution) {
   });
 }
 
-export { buildAppVdf, buildDepotVdf, buildDefaultDescription, generateSteamGuardCode };
+export {
+  buildAppVdf,
+  buildDepotVdf,
+  buildDefaultDescription,
+  buildSteamLoginArgs,
+  generateSteamGuardCode,
+  getSteamcmdConfigPath
+};

@@ -8,7 +8,7 @@ import { createArchive } from '../scripts/lib/archive.mjs';
 import { runCommand } from '../scripts/lib/command.mjs';
 import { readJson, writeJson } from '../scripts/lib/fs-utils.mjs';
 import { prepareSteamReleaseInput } from '../scripts/prepare-steam-release-input.mjs';
-import { generateSteamGuardCode } from '../scripts/publish-steam.mjs';
+import { buildSteamLoginArgs, generateSteamGuardCode, getSteamcmdConfigPath } from '../scripts/publish-steam.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -240,4 +240,32 @@ test('generateSteamGuardCode returns the expected length', () => {
   const code = generateSteamGuardCode('aGVsbG8gd29ybGQ=');
   assert.equal(code.length, 5);
   assert.match(code, /^[23456789BCDFGHJKMNPQRTVWXY]{5}$/);
+});
+
+test('buildSteamLoginArgs reuses a saved SteamCMD session without resending credentials', () => {
+  assert.deepEqual(
+    buildSteamLoginArgs({
+      steamUsername: 'builder-account',
+      steamPassword: 'secret',
+      steamGuardCode: 'ABCDE',
+      useSavedLogin: true
+    }),
+    ['+login', 'builder-account']
+  );
+});
+
+test('buildSteamLoginArgs includes password and guard code when bootstrapping a new SteamCMD session', () => {
+  assert.deepEqual(
+    buildSteamLoginArgs({
+      steamUsername: 'builder-account',
+      steamPassword: 'secret',
+      steamGuardCode: 'ABCDE',
+      useSavedLogin: false
+    }),
+    ['+login', 'builder-account', 'secret', 'ABCDE']
+  );
+  assert.equal(
+    getSteamcmdConfigPath('/tmp/portable-version-steamcmd/steamcmd.sh'),
+    path.resolve('/tmp/portable-version-steamcmd/config/config.vdf')
+  );
 });
