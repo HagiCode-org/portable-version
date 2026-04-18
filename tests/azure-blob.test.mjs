@@ -8,6 +8,7 @@ import {
   resolveAssetDownloadUrl,
   resolvePortableVersionIndexEntryByReleaseTag,
   sanitizeUrlForLogs,
+  uploadAzureBlob,
   upsertPortableVersionRootIndexEntry,
   validatePortableVersionRootIndexDocument
 } from '../scripts/lib/azure-blob.mjs';
@@ -169,6 +170,31 @@ test('fetchPortableVersionRootIndex returns an empty document on 404', async () 
 
   assert.equal(result.exists, false);
   assert.deepEqual(result.document.versions, []);
+});
+
+test('uploadAzureBlob retries transient header timeouts before succeeding', async () => {
+  let callCount = 0;
+
+  const result = await uploadAzureBlob({
+    sasUrl,
+    blobPath: 'v0.1.0-beta.33/hagicode-portable-linux-x64.zip',
+    content: Buffer.from('fixture'),
+    fetchImpl: async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        const timeoutError = new TypeError('fetch failed');
+        timeoutError.cause = Object.assign(new Error('Headers Timeout Error'), {
+          code: 'UND_ERR_HEADERS_TIMEOUT'
+        });
+        throw timeoutError;
+      }
+
+      return new Response('', { status: 201 });
+    }
+  });
+
+  assert.equal(callCount, 2);
+  assert.equal(result.blobPath, 'v0.1.0-beta.33/hagicode-portable-linux-x64.zip');
 });
 
 test('resolvePortableVersionIndexEntryByReleaseTag reports the sanitized index url for unknown releases', () => {

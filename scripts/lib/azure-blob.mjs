@@ -1,7 +1,23 @@
-import { createWriteStream } from 'node:fs';
-import { copyFile, readFile } from 'node:fs/promises';
+import http from 'node:http';
+import https from 'node:https';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { copyFile, readFile, stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { compareNormalizedVersions } from './index-source.mjs';
+
+const DEFAULT_AZURE_UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_AZURE_UPLOAD_MAX_ATTEMPTS = 3;
+const DEFAULT_AZURE_UPLOAD_RETRY_BASE_DELAY_MS = 1_000;
+const RETRIABLE_AZURE_UPLOAD_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+const RETRIABLE_AZURE_UPLOAD_ERROR_CODES = new Set([
+  'ECONNABORTED',
+  'ECONNRESET',
+  'EPIPE',
+  'ETIMEDOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT'
+]);
 
 function assertNonEmpty(value, message) {
   if (!value || String(value).trim() === '') {
@@ -21,6 +37,175 @@ function normalizeString(value, message) {
     throw new Error(message);
   }
   return normalized;
+}
+
+function readPositiveIntegerFromEnv(names, fallbackValue) {
+  for (const name of names) {
+    const candidate = process.env[name];
+    if (candidate === undefined) {
+      continue;
+    }
+
+    const parsed = Number.parseInt(String(candidate), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return fallbackValue;
+}
+
+function resolveAzureUploadSettings() {
+  return {
+    timeoutMs: readPositiveIntegerFromEnv(
+      ['PORTABLE_VERSION_AZURE_UPLOAD_TIMEOUT_MS', 'AZURE_BLOB_UPLOAD_TIMEOUT_MS'],
+      DEFAULT_AZURE_UPLOAD_TIMEOUT_MS
+    ),
+    maxAttempts: readPositiveIntegerFromEnv(
+      ['PORTABLE_VERSION_AZURE_UPLOAD_MAX_ATTEMPTS', 'AZURE_BLOB_UPLOAD_MAX_ATTEMPTS'],
+      DEFAULT_AZURE_UPLOAD_MAX_ATTEMPTS
+    ),
+    retryBaseDelayMs: readPositiveIntegerFromEnv(
+      ['PORTABLE_VERSION_AZURE_UPLOAD_RETRY_BASE_DELAY_MS', 'AZURE_BLOB_UPLOAD_RETRY_BASE_DELAY_MS'],
+      DEFAULT_AZURE_UPLOAD_RETRY_BASE_DELAY_MS
+    )
+  };
+}
+
+function sleep(delayMs) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
+function calculateRetryDelayMs(attemptNumber, retryBaseDelayMs) {
+  return retryBaseDelayMs * 2 ** Math.max(0, attemptNumber - 1);
+}
+
+function isRetriableAzureUploadStatus(status) {
+  return RETRIABLE_AZURE_UPLOAD_STATUS_CODES.has(Number(status));
+}
+
+function isRetriableAzureUploadError(error) {
+  const directCode = error?.code;
+  const causeCode = error?.cause?.code;
+  return RETRIABLE_AZURE_UPLOAD_ERROR_CODES.has(directCode) || RETRIABLE_AZURE_UPLOAD_ERROR_CODES.has(causeCode);
+}
+
+function buildAzureUploadFailureError({ targetUrl, attemptNumber, maxAttempts, detail, cause }) {
+  return new Error(
+    `Failed to upload Azure blob ${sanitizeUrlForLogs(targetUrl)} on attempt ${attemptNumber}/${maxAttempts}: ${detail}`,
+    cause ? { cause } : undefined
+  );
+}
+
+async function uploadAzureBlobWithNodeRequest({ targetUrl, filePath, content, contentType, timeoutMs }) {
+  const url = new URL(targetUrl);
+  const requestImpl = url.protocol === 'http:' ? http.request : https.request;
+  const requestHeaders = {
+    'x-ms-blob-type': 'BlockBlob',
+    'x-ms-version': '2023-11-03',
+    'content-type': contentType
+  };
+
+  let requestBody = content;
+  if (filePath) {
+    const fileStats = await stat(filePath);
+    requestHeaders['content-length'] = String(fileStats.size);
+  } else if (typeof content === 'string' || Buffer.isBuffer(content) || content instanceof Uint8Array) {
+    requestHeaders['content-length'] = String(Buffer.byteLength(content));
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finishResolve = (value) => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+    const finishReject = (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    };
+
+    const request = requestImpl(
+      url,
+      {
+        method: 'PUT',
+        headers: requestHeaders
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          responseBody += chunk;
+        });
+        response.on('end', () => {
+          finishResolve({
+            ok: response.statusCode >= 200 && response.statusCode < 300,
+            status: response.statusCode ?? 0,
+            body: responseBody
+          });
+        });
+        response.on('error', finishReject);
+      }
+    );
+
+    request.setTimeout(timeoutMs, () => {
+      const timeoutError = new Error(`Azure blob upload timed out after ${timeoutMs}ms.`);
+      timeoutError.code = 'ETIMEDOUT';
+      request.destroy(timeoutError);
+    });
+
+    request.on('error', finishReject);
+
+    if (filePath) {
+      const stream = createReadStream(filePath);
+      stream.on('error', (error) => {
+        request.destroy(error);
+      });
+      stream.pipe(request);
+      return;
+    }
+
+    if (requestBody instanceof Uint8Array && !Buffer.isBuffer(requestBody)) {
+      requestBody = Buffer.from(requestBody);
+    }
+    request.end(requestBody);
+  });
+}
+
+async function uploadAzureBlobWithFetch({
+  targetUrl,
+  filePath,
+  content,
+  contentType,
+  fetchImpl
+}) {
+  const body = filePath ? await readFile(filePath) : content;
+
+  if (body === undefined || body === null) {
+    throw new Error('Azure blob upload requires either filePath or content.');
+  }
+
+  const response = await fetchImpl(targetUrl, {
+    method: 'PUT',
+    headers: {
+      'x-ms-blob-type': 'BlockBlob',
+      'x-ms-version': '2023-11-03',
+      'content-type': contentType
+    },
+    body
+  });
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: response.ok ? '' : await response.text()
+  };
 }
 
 function xmlEntityDecode(value) {
@@ -409,34 +594,75 @@ export async function uploadAzureBlob({
 } = {}) {
   const normalizedBlobPath = normalizeString(blobPath, 'Azure blob path is required.').replace(/^\/+/, '');
   const targetUrl = buildSignedBlobUrl(sasUrl, normalizedBlobPath);
-  const body = filePath ? await readFile(filePath) : content;
+  const normalizedContentType = contentType ?? contentTypeFromPath(normalizedBlobPath);
+  const { timeoutMs, maxAttempts, retryBaseDelayMs } = resolveAzureUploadSettings();
 
-  if (body === undefined || body === null) {
+  if (!filePath && (content === undefined || content === null)) {
     throw new Error(`Azure blob upload ${normalizedBlobPath} requires either filePath or content.`);
   }
 
-  const response = await fetchImpl(targetUrl, {
-    method: 'PUT',
-    headers: {
-      'x-ms-blob-type': 'BlockBlob',
-      'x-ms-version': '2023-11-03',
-      'content-type': contentType ?? contentTypeFromPath(normalizedBlobPath)
-    },
-    body
-  });
+  for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
+    try {
+      const response =
+        fetchImpl === fetch
+          ? await uploadAzureBlobWithNodeRequest({
+              targetUrl,
+              filePath,
+              content,
+              contentType: normalizedContentType,
+              timeoutMs
+            })
+          : await uploadAzureBlobWithFetch({
+              targetUrl,
+              filePath,
+              content,
+              contentType: normalizedContentType,
+              fetchImpl
+            });
 
-  if (!response.ok) {
-    const responseBody = await response.text();
-    throw new Error(
-      `Failed to upload Azure blob ${sanitizeUrlForLogs(targetUrl)}: ${response.status} ${responseBody}`
-    );
+      if (response.ok) {
+        return {
+          blobPath: normalizedBlobPath,
+          uploadUrl: targetUrl,
+          sanitizedUploadUrl: sanitizeUrlForLogs(targetUrl)
+        };
+      }
+
+      const failure = buildAzureUploadFailureError({
+        targetUrl,
+        attemptNumber,
+        maxAttempts,
+        detail: `${response.status} ${response.body}`.trim()
+      });
+
+      if (attemptNumber < maxAttempts && isRetriableAzureUploadStatus(response.status)) {
+        await sleep(calculateRetryDelayMs(attemptNumber, retryBaseDelayMs));
+        continue;
+      }
+
+      throw failure;
+    } catch (error) {
+      const failure =
+        error instanceof Error && error.message.startsWith('Failed to upload Azure blob')
+          ? error
+          : buildAzureUploadFailureError({
+              targetUrl,
+              attemptNumber,
+              maxAttempts,
+              detail: error?.message ?? String(error),
+              cause: error
+            });
+
+      if (attemptNumber < maxAttempts && isRetriableAzureUploadError(error)) {
+        await sleep(calculateRetryDelayMs(attemptNumber, retryBaseDelayMs));
+        continue;
+      }
+
+      throw failure;
+    }
   }
 
-  return {
-    blobPath: normalizedBlobPath,
-    uploadUrl: targetUrl,
-    sanitizedUploadUrl: sanitizeUrlForLogs(targetUrl)
-  };
+  throw new Error(`Failed to upload Azure blob ${sanitizeUrlForLogs(targetUrl)}: retry budget exhausted.`);
 }
 
 export async function listAzureBlobs({ sasUrl, prefix = '', fetchImpl = fetch } = {}) {

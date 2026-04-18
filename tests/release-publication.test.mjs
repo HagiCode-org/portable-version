@@ -192,6 +192,43 @@ test('publish-release uploads assets to Azure and upserts the root index entry',
   });
 });
 
+test('publish-release retries transient Azure upload timeouts and completes publication', async () => {
+  const fixture = await createPublicationFixture();
+  const releaseTag = 'v0.1.0-beta.33';
+  const targetBlobPath = `${releaseTag}/hagicode-portable-linux-x64.zip`;
+  const baseFetch = createAzureFetchStub();
+  let simulatedTimeoutCount = 0;
+
+  const fetchImpl = async (url, options = {}) => {
+    const parsed = new URL(url);
+    const blobPath = parsed.pathname.split('/').slice(2).join('/');
+    if ((options.method ?? 'GET') === 'PUT' && blobPath === targetBlobPath && simulatedTimeoutCount === 0) {
+      simulatedTimeoutCount += 1;
+      const timeoutError = new TypeError('fetch failed');
+      timeoutError.cause = Object.assign(new Error('Headers Timeout Error'), {
+        code: 'UND_ERR_HEADERS_TIMEOUT'
+      });
+      throw timeoutError;
+    }
+
+    return baseFetch(url, options);
+  };
+
+  const result = await publishRelease({
+    planPath: fixture.planPath,
+    artifactsDir: fixture.artifactsDir,
+    outputDir: fixture.outputDir,
+    steamAzureSasUrl: 'https://example.blob.core.windows.net/hagicode-steam?sp=racwl&sig=test-token',
+    linuxDepotId: '123',
+    windowsDepotId: '456',
+    macosDepotId: '789',
+    fetchImpl
+  });
+
+  assert.equal(simulatedTimeoutCount, 1);
+  assert.equal(result.releaseTag, releaseTag);
+});
+
 test('publish-release overwrites the same Azure root index version entry on repeated publication', async () => {
   const fixture = await createPublicationFixture();
   const fetchImpl = createAzureFetchStub({
