@@ -99,6 +99,19 @@ function buildAzureUploadFailureError({ targetUrl, attemptNumber, maxAttempts, d
   );
 }
 
+async function describeAzureUploadPayload({ filePath, content }) {
+  if (filePath) {
+    const fileStats = await stat(filePath);
+    return `${fileStats.size} bytes from ${filePath}`;
+  }
+
+  if (typeof content === 'string' || Buffer.isBuffer(content) || content instanceof Uint8Array) {
+    return `${Buffer.byteLength(content)} bytes inline`;
+  }
+
+  return 'inline payload';
+}
+
 async function uploadAzureBlobWithNodeRequest({ targetUrl, filePath, content, contentType, timeoutMs }) {
   const url = new URL(targetUrl);
   const requestImpl = url.protocol === 'http:' ? http.request : https.request;
@@ -601,8 +614,14 @@ export async function uploadAzureBlob({
     throw new Error(`Azure blob upload ${normalizedBlobPath} requires either filePath or content.`);
   }
 
+  const payloadDescription = await describeAzureUploadPayload({ filePath, content });
+  console.log(
+    `[azure-upload] Starting upload for ${normalizedBlobPath} (${payloadDescription}) -> ${sanitizeUrlForLogs(targetUrl)}`
+  );
+
   for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
     try {
+      console.log(`[azure-upload] Attempt ${attemptNumber}/${maxAttempts} for ${normalizedBlobPath}`);
       const response =
         fetchImpl === fetch
           ? await uploadAzureBlobWithNodeRequest({
@@ -621,6 +640,7 @@ export async function uploadAzureBlob({
             });
 
       if (response.ok) {
+        console.log(`[azure-upload] Upload succeeded for ${normalizedBlobPath} on attempt ${attemptNumber}/${maxAttempts}`);
         return {
           blobPath: normalizedBlobPath,
           uploadUrl: targetUrl,
@@ -636,7 +656,11 @@ export async function uploadAzureBlob({
       });
 
       if (attemptNumber < maxAttempts && isRetriableAzureUploadStatus(response.status)) {
-        await sleep(calculateRetryDelayMs(attemptNumber, retryBaseDelayMs));
+        const delayMs = calculateRetryDelayMs(attemptNumber, retryBaseDelayMs);
+        console.warn(
+          `[azure-upload] Retrying ${normalizedBlobPath} after HTTP ${response.status} in ${delayMs}ms`
+        );
+        await sleep(delayMs);
         continue;
       }
 
@@ -654,7 +678,11 @@ export async function uploadAzureBlob({
             });
 
       if (attemptNumber < maxAttempts && isRetriableAzureUploadError(error)) {
-        await sleep(calculateRetryDelayMs(attemptNumber, retryBaseDelayMs));
+        const delayMs = calculateRetryDelayMs(attemptNumber, retryBaseDelayMs);
+        console.warn(
+          `[azure-upload] Retrying ${normalizedBlobPath} after transient error in ${delayMs}ms: ${error?.message ?? String(error)}`
+        );
+        await sleep(delayMs);
         continue;
       }
 

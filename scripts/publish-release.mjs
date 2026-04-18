@@ -225,7 +225,10 @@ function buildResultVersionEntry({ plan, publicationArtifacts, steamDepotIds, pu
 
 async function uploadPublicationArtifacts({ steamAzureSasUrl, uploads, fetchImpl }) {
   const uploaded = [];
-  for (const upload of uploads) {
+  for (const [index, upload] of uploads.entries()) {
+    console.log(
+      `[publish-release] Uploading ${index + 1}/${uploads.length}: ${upload.blobPath} (${upload.kind}${upload.platform ? `, ${upload.platform}` : ''})`
+    );
     uploaded.push(
       await uploadAzureBlob({
         sasUrl: steamAzureSasUrl,
@@ -320,11 +323,15 @@ export async function publishRelease({
   }
 
   const publishedAt = new Date().toISOString();
+  console.log(
+    `[publish-release] Starting Azure publication for ${releaseTag} with ${publicationArtifacts.uploads.length} uploads -> ${sanitizeUrlForLogs(steamAzureSasUrl)}`
+  );
   const uploadedBlobs = await uploadPublicationArtifacts({
     steamAzureSasUrl,
     uploads: publicationArtifacts.uploads,
     fetchImpl
   });
+  console.log(`[publish-release] Uploaded ${uploadedBlobs.length} blobs for ${releaseTag}, verifying Azure visibility`);
   const visibleBlobs = await listAzureBlobs({
     sasUrl: steamAzureSasUrl,
     prefix: `${releaseTag}/`,
@@ -335,6 +342,7 @@ export async function publishRelease({
     expectedBlobPaths: publicationArtifacts.uploads.map((upload) => upload.blobPath),
     releaseTag
   });
+  console.log(`[publish-release] Azure visibility check succeeded for ${releaseTag}, fetching root index`);
 
   const rootIndex = await fetchPortableVersionRootIndex({
     sasUrl: steamAzureSasUrl,
@@ -349,6 +357,9 @@ export async function publishRelease({
   const updatedRootIndex = upsertPortableVersionRootIndexEntry(rootIndex.document, nextVersionEntry, {
     generatedAt: publishedAt
   });
+  console.log(
+    `[publish-release] Writing root index for ${releaseTag} (${rootIndex.exists ? 'upsert existing index' : 'create new index'})`
+  );
   await writePortableVersionRootIndex({
     sasUrl: steamAzureSasUrl,
     document: updatedRootIndex,
@@ -356,6 +367,7 @@ export async function publishRelease({
     generatedAt: publishedAt
   });
 
+  console.log(`[publish-release] Verifying root index entry for ${releaseTag}`);
   const verifiedIndexEntry = await findPortableVersionReleaseByTag({
     sasUrl: steamAzureSasUrl,
     releaseTag,
@@ -366,6 +378,7 @@ export async function publishRelease({
       `Portable Version root index ${rootIndex.sanitizedIndexUrl} did not expose version "${releaseTag}" after index update.`
     );
   }
+  console.log(`[publish-release] Root index verification succeeded for ${releaseTag}`);
 
   const resultPath = path.join(resolvedOutputDir, `${releaseTag}.publish-result.json`);
   await writeJson(resultPath, {
