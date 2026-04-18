@@ -15,7 +15,7 @@ The release workflow supports three non-interactive entrypoints:
 
 - `schedule` polls the Desktop and Server index manifests on a daily cadence.
 - `workflow_dispatch` supports targeted rebuilds with optional Desktop selector, service selector, platform, dry-run, and force-rebuild inputs.
-- `repository_dispatch` accepts `client_payload` fields (`desktopTag`, `serviceTag`, `platforms`, `forceRebuild`, `dryRun`) and still requires both selectors so the automation stays non-interactive.
+- `repository_dispatch` accepts `client_payload` fields (`serviceTag`, optional `desktopTag`, `platforms`, `forceRebuild`, `dryRun`). `serviceTag` is required so the automation stays non-interactive, while `desktopTag` falls back to the default Desktop resolution path when omitted.
 
 The Steam workflow is `workflow_dispatch` only and requires an explicit `release` tag for every run.
 
@@ -44,14 +44,16 @@ When no selector is provided, the build plan resolves the latest indexed Desktop
 
 ## Release tag convention
 
-Portable Version releases now use a readable concatenated tag instead of the old hashed `pv-release-*` namespace:
+Portable Version releases now use a readable Web-driven tag instead of the old hashed `pv-release-*` namespace:
 
-- canonical format: `<web-tag>-<desktop-tag>`
+- canonical format: `<web-tag>`
 - current mapping: `web-tag` means the selected `service_tag` / `PCode.Web` payload version
+- `desktop_tag` remains available as an optional source-selection override, but it only affects Desktop asset resolution and provenance
 - normalization rule: `refs/tags/v0.1.0-beta.35`, `v0.1.0-beta.35`, and `0.1.0-beta.35` all normalize to `v0.1.0-beta.35`
-- example: `service_tag=0.1.0-beta.35` plus `desktop_tag=refs/tags/v0.1.34` produces `v0.1.0-beta.35-v0.1.34`
+- `workflow_dispatch` example: `service_tag=0.1.0-beta.35` plus `desktop_tag=refs/tags/v0.1.34` still produces release tag `v0.1.0-beta.35`
+- `repository_dispatch` example: `{"event_type":"portable-version-build","client_payload":{"serviceTag":"0.1.0-beta.35"}}` resolves the latest Desktop release and still produces `v0.1.0-beta.35`
 
-The same concatenated tag is reused for duplicate detection, workflow outputs, GitHub Release titles, release notes, and dry-run metadata filenames.
+The same Web-only tag is reused for duplicate detection, workflow outputs, GitHub Release titles, release notes, and dry-run metadata filenames. Desktop version details remain in the build manifest, release notes, and dry-run metadata for provenance.
 
 ## Data sources and download model
 
@@ -171,7 +173,7 @@ Use these recovery paths when a workflow run fails or must be replayed:
 
 1. Re-run the workflow with `workflow_dispatch` and set `dry_run=true` to confirm index resolution, payload staging, and repacking without publishing.
 2. If the derived Portable Version release already exists but the prior upload was partial, re-run with `force_rebuild=true`.
-3. If a specific upstream pair must be replayed, supply explicit `desktop_tag` and `service_tag` selectors.
+3. If a specific upstream build must be replayed, provide `service_tag` and optionally `desktop_tag` when you need to pin a non-default Desktop asset.
 4. Inspect the uploaded workflow artifacts:
    - `portable-release-build-plan`
    - `portable-release-package-<platform>`
@@ -184,7 +186,7 @@ Use these recovery paths when a workflow run fails or must be replayed:
 
 Each successful build publishes:
 
-- one deterministic Portable Version tag in the `<web-tag>-<desktop-tag>` namespace
+- one deterministic Portable Version tag in the `<web-tag>` namespace
 - repacked Desktop artifacts copied to deterministic asset names such as `hagicode-portable-linux-x64.zip`
 - the normalized build manifest
 - merged artifact inventory metadata
