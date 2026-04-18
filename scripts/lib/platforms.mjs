@@ -163,10 +163,8 @@ export function normalizeReleaseTagComponent(value) {
   return `v${normalized.replace(/^v/i, '')}`;
 }
 
-export function derivePortableReleaseTag(serviceTag, desktopTag) {
-  const normalizedServiceTag = normalizeReleaseTagComponent(serviceTag);
-  const normalizedDesktopTag = normalizeReleaseTagComponent(desktopTag);
-  return `${normalizedServiceTag}-${normalizedDesktopTag}`;
+export function derivePortableReleaseTag(serviceTag) {
+  return normalizeReleaseTagComponent(serviceTag);
 }
 
 export function createPlatformMatrix(platforms) {

@@ -51,9 +51,9 @@ export function normalizeTriggerInputs({ eventName, eventPayload, defaultPlatfor
   );
   const dryRun = normalizeBoolean(coalesce(inputs.dry_run, dispatchPayload.dryRun, dispatchPayload.dry_run), false);
 
-  if (eventName === 'repository_dispatch' && (!desktopSelector || !serviceSelector)) {
+  if (eventName === 'repository_dispatch' && !serviceSelector) {
     throw new Error(
-      'repository_dispatch payload must include both desktopTag and serviceTag so the build plan stays non-interactive.'
+      'repository_dispatch payload must include serviceTag so the build plan stays non-interactive. desktopTag remains optional.'
     );
   }
 
@@ -108,12 +108,12 @@ export async function buildPlan({
     })
   ]);
 
-  const releaseTag = derivePortableReleaseTag(serviceRelease.version, desktopRelease.version);
+  const releaseTag = derivePortableReleaseTag(serviceRelease.version);
   const existingPortableRelease = await findPortableRelease(repositories.portable, releaseTag, token);
   const releaseExists = Boolean(existingPortableRelease);
   const shouldBuild = !releaseExists || trigger.forceRebuild;
   const skipReason = !shouldBuild
-    ? `Portable Version release ${releaseTag} already exists and force_rebuild was not enabled.`
+    ? `Portable Version release ${releaseTag} already exists for the normalized Web version and force_rebuild was not enabled.`
     : null;
 
   const downloads = {

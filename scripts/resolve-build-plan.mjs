@@ -81,6 +81,7 @@ async function main() {
   await writeGithubOutputs({
     plan_path: outputPath,
     release_tag: plan.release.tag,
+    release_identity: 'web-only',
     should_build: plan.build.shouldBuild,
     dry_run: plan.build.dryRun,
     platform_matrix: JSON.stringify(plan.platformMatrix)
@@ -95,7 +96,7 @@ async function main() {
     `- Service index: ${plan.upstream.service.manifestUrl}`,
     `- Service version: ${plan.upstream.service.version}`,
     `- Platforms: ${selectedPlatforms}`,
-    `- Derived release tag (web-desktop): ${plan.release.tag}`,
+    `- Derived release tag (Web-driven): ${plan.release.tag}`,
     `- Desktop Azure SAS: ${sanitizeUrlForLogs(desktopAzureSasUrl)}`,
     `- Service Azure SAS: ${sanitizeUrlForLogs(serviceAzureSasUrl)}`,
     `- Release exists: ${plan.release.exists ? 'yes' : 'no'}`,
@@ -108,6 +109,7 @@ async function main() {
       {
         outputPath,
         releaseTag: plan.release.tag,
+        releaseIdentity: 'web-only',
         shouldBuild: plan.build.shouldBuild
       },
       null,

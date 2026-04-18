@@ -12,7 +12,7 @@ function getGhCommand() {
 
 function buildReleaseNotes(plan, inventories) {
   const releaseTag = plan.release.tag;
-  const releaseName = plan.release.name ?? `Portable Version ${releaseTag}`;
+  const releaseName = plan.release.notesTitle ?? plan.release.name ?? `Portable Version ${releaseTag}`;
   const platformList = inventories.map((inventory) => inventory.platform).join(', ');
   const desktopSource = `${plan.upstream.desktop.manifestUrl}@${plan.upstream.desktop.version}`;
   const webSource = `${plan.upstream.service.manifestUrl}@${plan.upstream.service.version}`;
@@ -21,7 +21,7 @@ function buildReleaseNotes(plan, inventories) {
     '',
     'Automated Portable Version release.',
     '',
-    `- Portable release tag: ${releaseTag}`,
+    `- Portable release identity: ${releaseTag} (derived from the Web/service tag)`,
     `- Desktop source: ${desktopSource}`,
     `- Web(service) source: ${webSource}`,
     `- Trigger: ${plan.trigger.type}`,
@@ -140,7 +140,24 @@ async function main() {
     const dryRunReportPath = path.join(outputDir, `${releaseTag}.publish-dry-run.json`);
     await writeJson(dryRunReportPath, {
       releaseTag,
+      releaseIdentity: 'web-only',
       repository: plan.release.repository,
+      upstream: {
+        desktop: {
+          version: plan.upstream.desktop.version,
+          manifestUrl: plan.upstream.desktop.manifestUrl
+        },
+        service: {
+          version: plan.upstream.service.version,
+          manifestUrl: plan.upstream.service.manifestUrl
+        }
+      },
+      metadataFiles: {
+        buildManifestPath,
+        mergedInventoryPath,
+        mergedChecksumsPath,
+        notesPath
+      },
       notesPath,
       assetFiles
     });
