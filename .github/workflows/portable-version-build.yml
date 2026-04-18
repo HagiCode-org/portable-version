@@ -24,7 +24,7 @@ on:
         default: false
         type: boolean
       dry_run:
-        description: 'Resolve, stage, and package without publishing a GitHub Release.'
+        description: 'Resolve, stage, and package without publishing to the Azure Steam container.'
         required: false
         default: false
         type: boolean
@@ -46,6 +46,7 @@ env:
   PORTABLE_VERSION_GITHUB_TOKEN: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
   PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL }}
   PORTABLE_VERSION_SERVICE_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL }}
+  PORTABLE_VERSION_STEAM_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_STEAM_AZURE_SAS_URL }}
 
 jobs:
   resolve:
@@ -209,7 +210,9 @@ jobs:
         working-directory: .
         shell: bash
         env:
-          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+          STEAM_DEPOT_ID_LINUX: ${{ secrets.STEAM_DEPOT_ID_LINUX }}
+          STEAM_DEPOT_ID_WINDOWS: ${{ secrets.STEAM_DEPOT_ID_WINDOWS }}
+          STEAM_DEPOT_ID_MACOS: ${{ secrets.STEAM_DEPOT_ID_MACOS }}
         run: |
           node scripts/publish-release.mjs \
             --plan "$RUNNER_TEMP/build-plan/build-plan.json" \

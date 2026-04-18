@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: 'Portable Version release tag to publish to Steam (for example v0.1.0-beta.35-v0.1.34).'
+        description: 'Portable Version release tag to publish to Steam (for example v0.1.0-beta.35).'
         required: true
         type: string
       steam_preview:
@@ -28,9 +28,6 @@ permissions:
 concurrency:
   group: portable-version-steam-${{ github.event.inputs.release }}
   cancel-in-progress: false
-
-env:
-  PORTABLE_VERSION_GITHUB_TOKEN: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
 
 jobs:
   publish_steam:
@@ -59,7 +56,7 @@ jobs:
         working-directory: .
         shell: bash
         env:
-          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+          PORTABLE_VERSION_STEAM_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_STEAM_AZURE_SAS_URL }}
         run: |
           node scripts/prepare-steam-release-input.mjs \
             --release "${{ github.event.inputs.release }}" \
@@ -90,9 +87,6 @@ jobs:
         shell: bash
         env:
           STEAM_APP_ID: ${{ secrets.STEAM_APP_ID }}
-          STEAM_DEPOT_ID_LINUX: ${{ secrets.STEAM_DEPOT_ID_LINUX }}
-          STEAM_DEPOT_ID_WINDOWS: ${{ secrets.STEAM_DEPOT_ID_WINDOWS }}
-          STEAM_DEPOT_ID_MACOS: ${{ secrets.STEAM_DEPOT_ID_MACOS }}
           STEAMCMD_PATH: ${{ env.STEAMCMD_ROOT }}/steamcmd.sh
           STEAM_BRANCH_INPUT: ${{ github.event.inputs.steam_branch }}
           STEAM_DESCRIPTION_INPUT: ${{ github.event.inputs.steam_description }}
@@ -100,21 +94,10 @@ jobs:
         run: |
           cmd=(
             node scripts/publish-steam.mjs
-            --plan "$RUNNER_TEMP/portable-steam-release/metadata/${{ github.event.inputs.release }}.build-manifest.json"
-            --content-root "$RUNNER_TEMP/portable-steam-release/steam-content"
+            --release-input "$RUNNER_TEMP/portable-steam-release/metadata/steam-release-input.json"
             --output-dir "$RUNNER_TEMP/portable-steam-build"
             --app-id "$STEAM_APP_ID"
           )
-
-          if [ -n "$STEAM_DEPOT_ID_LINUX" ]; then
-            cmd+=(--linux-depot-id "$STEAM_DEPOT_ID_LINUX")
-          fi
-          if [ -n "$STEAM_DEPOT_ID_WINDOWS" ]; then
-            cmd+=(--windows-depot-id "$STEAM_DEPOT_ID_WINDOWS")
-          fi
-          if [ -n "$STEAM_DEPOT_ID_MACOS" ]; then
-            cmd+=(--macos-depot-id "$STEAM_DEPOT_ID_MACOS")
-          fi
           if [ "$STEAM_PREVIEW_INPUT" != 'true' ] && [ -n "$STEAM_BRANCH_INPUT" ]; then
             cmd+=(--branch "$STEAM_BRANCH_INPUT")
           fi
