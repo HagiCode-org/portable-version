@@ -1,4 +1,8 @@
-import { getAzureBlobContainerUrl, sanitizeUrlForLogs } from './azure-blob.mjs';
+import {
+  findPortableVersionReleaseByTag,
+  getAzureBlobContainerUrl,
+  sanitizeUrlForLogs
+} from './azure-blob.mjs';
 import { findReleaseByTag } from './github.mjs';
 import { DEFAULT_INDEX_SOURCES, resolveIndexRelease } from './index-source.mjs';
 import {
@@ -83,7 +87,8 @@ export async function buildPlan({
   now = new Date().toISOString(),
   fetchImpl,
   findPortableRelease = findReleaseByTag,
-  azureSasUrls
+  azureSasUrls,
+  portableAzureSasUrl
 }) {
   const trigger = normalizeTriggerInputs({
     eventName,
@@ -109,11 +114,17 @@ export async function buildPlan({
   ]);
 
   const releaseTag = derivePortableReleaseTag(serviceRelease.version);
-  const existingPortableRelease = await findPortableRelease(repositories.portable, releaseTag, token);
+  const existingPortableRelease = portableAzureSasUrl
+    ? await findPortableVersionReleaseByTag({
+        sasUrl: portableAzureSasUrl,
+        releaseTag,
+        fetchImpl
+      })
+    : await findPortableRelease(repositories.portable, releaseTag, token);
   const releaseExists = Boolean(existingPortableRelease);
   const shouldBuild = !releaseExists || trigger.forceRebuild;
   const skipReason = !shouldBuild
-    ? `Portable Version release ${releaseTag} already exists for the normalized Web version and force_rebuild was not enabled.`
+    ? `Portable Version release ${releaseTag} already exists for the normalized Web version in the Azure publication index and force_rebuild was not enabled.`
     : null;
 
   const downloads = {
@@ -148,7 +159,7 @@ export async function buildPlan({
       tag: releaseTag,
       name: `Portable Version ${releaseTag}`,
       exists: releaseExists,
-      url: existingPortableRelease?.html_url ?? null,
+      url: existingPortableRelease?.html_url ?? existingPortableRelease?.sanitizedIndexUrl ?? null,
       notesTitle: `Portable Version ${releaseTag}`
     },
     build: {

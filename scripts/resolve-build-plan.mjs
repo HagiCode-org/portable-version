@@ -20,7 +20,8 @@ async function main() {
       'desktop-index-url': { type: 'string' },
       'service-index-url': { type: 'string' },
       'desktop-azure-sas-url': { type: 'string' },
-      'service-azure-sas-url': { type: 'string' }
+      'service-azure-sas-url': { type: 'string' },
+      'steam-azure-sas-url': { type: 'string' }
     }
   });
 
@@ -39,6 +40,12 @@ async function main() {
     values['service-azure-sas-url'] ??
     process.env.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL ??
     process.env.SERVICE_AZURE_BLOB_SAS_URL ??
+    process.env.PORTABLE_VERSION_AZURE_SAS_URL ??
+    process.env.AZURE_BLOB_SAS_URL ??
+    process.env.AZURE_SAS_URL;
+  const steamAzureSasUrl =
+    values['steam-azure-sas-url'] ??
+    process.env.PORTABLE_VERSION_STEAM_AZURE_SAS_URL ??
     process.env.PORTABLE_VERSION_AZURE_SAS_URL ??
     process.env.AZURE_BLOB_SAS_URL ??
     process.env.AZURE_SAS_URL;
@@ -73,7 +80,8 @@ async function main() {
     azureSasUrls: {
       desktop: desktopAzureSasUrl,
       service: serviceAzureSasUrl
-    }
+    },
+    portableAzureSasUrl: steamAzureSasUrl
   });
 
   await writeJson(outputPath, plan);
@@ -99,7 +107,8 @@ async function main() {
     `- Derived release tag (Web-driven): ${plan.release.tag}`,
     `- Desktop Azure SAS: ${sanitizeUrlForLogs(desktopAzureSasUrl)}`,
     `- Service Azure SAS: ${sanitizeUrlForLogs(serviceAzureSasUrl)}`,
-    `- Release exists: ${plan.release.exists ? 'yes' : 'no'}`,
+    `- Steam Azure SAS: ${steamAzureSasUrl ? sanitizeUrlForLogs(steamAzureSasUrl) : '[not-configured]'}`,
+    `- Release exists in Azure index: ${plan.release.exists ? 'yes' : 'no'}`,
     `- Build mode: ${plan.build.dryRun ? 'dry-run' : 'publish'}`,
     plan.build.shouldBuild ? '- Packaging will continue.' : `- Packaging skipped: ${plan.build.skipReason}`
   ]);
