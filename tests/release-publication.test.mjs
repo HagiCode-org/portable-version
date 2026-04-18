@@ -27,8 +27,8 @@ test('publish-release emits a dry-run publication report', async () => {
     },
     release: {
       repository: 'HagiCode-org/portable-version',
-      tag: 'v0.1.0-beta.33-v0.2.0',
-      name: 'Portable Version v0.1.0-beta.33-v0.2.0'
+      tag: 'v0.1.0-beta.33',
+      name: 'Portable Version v0.1.0-beta.33'
     },
     build: { dryRun: true }
   });
@@ -58,7 +58,10 @@ test('publish-release emits a dry-run publication report', async () => {
     '--force-dry-run'
   ]);
 
-  const report = await readJson(path.join(outputDir, 'v0.1.0-beta.33-v0.2.0.publish-dry-run.json'));
-  assert.equal(report.releaseTag, 'v0.1.0-beta.33-v0.2.0');
+  const report = await readJson(path.join(outputDir, 'v0.1.0-beta.33.publish-dry-run.json'));
+  assert.equal(report.releaseTag, 'v0.1.0-beta.33');
+  assert.equal(report.releaseIdentity, 'web-only');
+  assert.equal(report.upstream.desktop.version, 'v0.2.0');
+  assert.equal(report.upstream.service.version, '0.1.0-beta.33');
   assert.ok(report.assetFiles.some((filePath) => filePath.endsWith('.build-manifest.json')));
 });

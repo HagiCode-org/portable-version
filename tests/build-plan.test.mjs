@@ -104,7 +104,24 @@ test('normalizeTriggerInputs uses workflow_dispatch overrides and booleans', () 
   assert.equal(normalized.dryRun, true);
 });
 
-test('normalizeTriggerInputs requires repository_dispatch versions', () => {
+test('normalizeTriggerInputs allows repository_dispatch without desktopTag', () => {
+  const normalized = normalizeTriggerInputs({
+    eventName: 'repository_dispatch',
+    eventPayload: {
+      client_payload: {
+        serviceTag: 'v0.1.0-beta.33',
+        platforms: 'linux-x64'
+      }
+    },
+    defaultPlatforms
+  });
+
+  assert.equal(normalized.desktopSelector, undefined);
+  assert.equal(normalized.serviceSelector, 'v0.1.0-beta.33');
+  assert.deepEqual(normalized.selectedPlatforms, ['linux-x64']);
+});
+
+test('normalizeTriggerInputs requires repository_dispatch serviceTag', () => {
   assert.throws(
     () =>
       normalizeTriggerInputs({
@@ -112,7 +129,7 @@ test('normalizeTriggerInputs requires repository_dispatch versions', () => {
         eventPayload: { client_payload: { platforms: 'linux-x64' } },
         defaultPlatforms
       }),
-    /must include both desktopTag and serviceTag/
+    /must include serviceTag/
   );
 });
 
@@ -145,15 +162,15 @@ test('buildPlan resolves latest index versions and platform assets', async () =>
   assert.equal(plan.upstream.service.assetsByPlatform['linux-x64'].path, '0.1.0-beta.35/hagicode-0.1.0-beta.35-linux-x64-nort.zip');
   assert.equal(plan.downloads.desktop.containerUrl, 'https://example.blob.core.windows.net/desktop/');
   assert.equal(plan.downloads.service.containerUrl, 'https://example.blob.core.windows.net/server/');
-  assert.equal(plan.release.tag, 'v0.1.0-beta.35-v0.1.34');
-  assert.equal(plan.release.name, 'Portable Version v0.1.0-beta.35-v0.1.34');
-  assert.equal(plan.release.notesTitle, 'Portable Version v0.1.0-beta.35-v0.1.34');
+  assert.equal(plan.release.tag, 'v0.1.0-beta.35');
+  assert.equal(plan.release.name, 'Portable Version v0.1.0-beta.35');
+  assert.equal(plan.release.notesTitle, 'Portable Version v0.1.0-beta.35');
   assert.equal(plan.build.shouldBuild, true);
 });
 
 test('buildPlan normalizes explicit selectors and reuses existing release state', async () => {
   const existingRelease = {
-    html_url: 'https://github.com/HagiCode-org/portable-version/releases/tag/v0.1.0-beta.33-v0.1.34'
+    html_url: 'https://github.com/HagiCode-org/portable-version/releases/tag/v0.1.0-beta.33'
   };
   const plan = await buildPlan({
     eventName: 'workflow_dispatch',
@@ -182,15 +199,110 @@ test('buildPlan normalizes explicit selectors and reuses existing release state'
   assert.equal(plan.upstream.desktop.version, 'v0.1.34');
   assert.equal(plan.upstream.service.selector, 'v0.1.0-beta.33');
   assert.equal(plan.upstream.service.version, '0.1.0-beta.33');
-  assert.equal(plan.release.tag, derivePortableReleaseTag('0.1.0-beta.33', 'v0.1.34'));
+  assert.equal(plan.release.tag, derivePortableReleaseTag('0.1.0-beta.33'));
   assert.equal(plan.release.exists, true);
   assert.equal(plan.build.shouldBuild, false);
 });
 
-test('derivePortableReleaseTag canonicalizes service and desktop tags before concatenation', () => {
+test('buildPlan derives the same release tag for equivalent Web selector forms', async () => {
+  const selectors = ['refs/tags/v0.1.0-beta.33', 'v0.1.0-beta.33', '0.1.0-beta.33'];
+  const releaseTags = await Promise.all(
+    selectors.map(async (selector) => {
+      const plan = await buildPlan({
+        eventName: 'workflow_dispatch',
+        eventPayload: {
+          inputs: {
+            desktop_tag: 'v0.1.34',
+            service_tag: selector,
+            platforms: 'linux-x64'
+          }
+        },
+        repositories: {
+          desktop: desktopIndexUrl,
+          service: serviceIndexUrl,
+          portable: 'HagiCode-org/portable-version'
+        },
+        defaultPlatforms,
+        fetchImpl: createFetchStub({
+          [desktopIndexUrl]: desktopIndexManifest,
+          [serviceIndexUrl]: serviceIndexManifest
+        }),
+        findPortableRelease: async () => null
+      });
+
+      return plan.release.tag;
+    })
+  );
+
+  assert.deepEqual(releaseTags, ['v0.1.0-beta.33', 'v0.1.0-beta.33', 'v0.1.0-beta.33']);
+});
+
+test('buildPlan duplicate detection is keyed by normalized Web tag even when desktop selector changes', async () => {
+  const lookupTags = [];
+  const findPortableRelease = async (_repository, tag) => {
+    lookupTags.push(tag);
+    return {
+      html_url: `https://github.com/HagiCode-org/portable-version/releases/tag/${tag}`,
+      tag_name: tag
+    };
+  };
+
+  const planWithLatestDesktop = await buildPlan({
+    eventName: 'workflow_dispatch',
+    eventPayload: {
+      inputs: {
+        desktop_tag: 'v0.1.34',
+        service_tag: 'v0.1.0-beta.33',
+        platforms: 'linux-x64'
+      }
+    },
+    repositories: {
+      desktop: desktopIndexUrl,
+      service: serviceIndexUrl,
+      portable: 'HagiCode-org/portable-version'
+    },
+    defaultPlatforms,
+    fetchImpl: createFetchStub({
+      [desktopIndexUrl]: desktopIndexManifest,
+      [serviceIndexUrl]: serviceIndexManifest
+    }),
+    findPortableRelease
+  });
+
+  const planWithOlderDesktop = await buildPlan({
+    eventName: 'workflow_dispatch',
+    eventPayload: {
+      inputs: {
+        desktop_tag: 'v0.1.9',
+        service_tag: 'v0.1.0-beta.33',
+        platforms: 'linux-x64'
+      }
+    },
+    repositories: {
+      desktop: desktopIndexUrl,
+      service: serviceIndexUrl,
+      portable: 'HagiCode-org/portable-version'
+    },
+    defaultPlatforms,
+    fetchImpl: createFetchStub({
+      [desktopIndexUrl]: desktopIndexManifest,
+      [serviceIndexUrl]: serviceIndexManifest
+    }),
+    findPortableRelease
+  });
+
+  assert.equal(planWithLatestDesktop.release.tag, 'v0.1.0-beta.33');
+  assert.equal(planWithOlderDesktop.release.tag, 'v0.1.0-beta.33');
+  assert.equal(planWithLatestDesktop.upstream.desktop.version, 'v0.1.34');
+  assert.equal(planWithOlderDesktop.upstream.desktop.version, 'v0.1.9');
+  assert.equal(planWithOlderDesktop.build.shouldBuild, false);
+  assert.deepEqual(lookupTags, ['v0.1.0-beta.33', 'v0.1.0-beta.33']);
+});
+
+test('derivePortableReleaseTag canonicalizes the Web tag before release-tag derivation', () => {
   assert.equal(
-    derivePortableReleaseTag('refs/tags/v0.1.0-beta.33', '0.1.31'),
-    'v0.1.0-beta.33-v0.1.31'
+    derivePortableReleaseTag('refs/tags/v0.1.0-beta.33'),
+    'v0.1.0-beta.33'
   );
 });
 
