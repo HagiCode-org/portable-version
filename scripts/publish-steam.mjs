@@ -11,9 +11,14 @@ import { annotateError, appendSummary } from './lib/summary.mjs';
 const STEAM_GUARD_ALPHABET = '23456789BCDFGHJKMNPQRTVWXY';
 const UNIFIED_MACOS_CONTENT_PLATFORM = 'osx-universal';
 const PLATFORM_OPTIONS = [
-  { id: 'linux-x64', cliOption: 'linux-depot-id', contentPlatforms: ['linux-x64'] },
-  { id: 'win-x64', cliOption: 'windows-depot-id', contentPlatforms: ['win-x64'] },
-  { id: 'macos', cliOption: 'macos-depot-id', contentPlatforms: [UNIFIED_MACOS_CONTENT_PLATFORM, 'osx-x64', 'osx-arm64'] }
+  { id: 'linux-x64', metadataKey: 'linux', cliOption: 'linux-depot-id', contentPlatforms: ['linux-x64'] },
+  { id: 'win-x64', metadataKey: 'windows', cliOption: 'windows-depot-id', contentPlatforms: ['win-x64'] },
+  {
+    id: 'macos',
+    metadataKey: 'macos',
+    cliOption: 'macos-depot-id',
+    contentPlatforms: [UNIFIED_MACOS_CONTENT_PLATFORM, 'osx-x64', 'osx-arm64']
+  }
 ];
 
 function escapeVdf(value) {
@@ -124,11 +129,77 @@ function buildSteamLoginArgs({ steamUsername, steamPassword, steamGuardCode, use
   return loginArgs;
 }
 
-async function resolveDepotDefinitions(options, contentRoot) {
+function requireNonEmptyString(value, label) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) {
+    throw new Error(`${label} must be a non-empty string.`);
+  }
+  return normalized;
+}
+
+function normalizeSteamDepotIds(steamDepotIds, { sourceLabel, requireAllPlatforms }) {
+  const normalized = {};
+
+  for (const platform of PLATFORM_OPTIONS) {
+    const rawDepotId = steamDepotIds?.[platform.metadataKey];
+    if (!rawDepotId) {
+      if (requireAllPlatforms) {
+        throw new Error(
+          `${sourceLabel} is missing steamDepotIds.${platform.metadataKey}; Steam publication cannot continue.`
+        );
+      }
+      continue;
+    }
+
+    normalized[platform.metadataKey] = requireNonEmptyString(
+      rawDepotId,
+      `${sourceLabel}.steamDepotIds.${platform.metadataKey}`
+    );
+  }
+
+  if (Object.keys(normalized).length === 0) {
+    throw new Error(`${sourceLabel} does not contain any Steam depot ids.`);
+  }
+
+  return normalized;
+}
+
+function resolveCliSteamDepotIds(values) {
+  const depotIds = {};
+  for (const platform of PLATFORM_OPTIONS) {
+    const value = values[platform.cliOption];
+    if (value) {
+      depotIds[platform.metadataKey] = value;
+    }
+  }
+  return normalizeSteamDepotIds(depotIds, {
+    sourceLabel: 'CLI depot arguments',
+    requireAllPlatforms: false
+  });
+}
+
+async function loadReleaseInput(releaseInputPath) {
+  const resolvedPath = path.resolve(releaseInputPath);
+  const releaseInput = await readJson(resolvedPath);
+
+  return {
+    sourcePath: resolvedPath,
+    releaseTag: requireNonEmptyString(releaseInput?.releaseTag, 'release-input.releaseTag'),
+    planPath: path.resolve(requireNonEmptyString(releaseInput?.buildManifestPath, 'release-input.buildManifestPath')),
+    contentRoot: path.resolve(requireNonEmptyString(releaseInput?.contentRoot, 'release-input.contentRoot')),
+    steamDepotIds: normalizeSteamDepotIds(releaseInput?.steamDepotIds, {
+      sourceLabel: `release-input ${resolvedPath}`,
+      requireAllPlatforms: true
+    }),
+    azureIndex: releaseInput?.azureIndex ?? null
+  };
+}
+
+async function resolveDepotDefinitions(steamDepotIds, contentRoot) {
   const depotDefinitions = [];
 
   for (const platform of PLATFORM_OPTIONS) {
-    const depotId = options[platform.cliOption];
+    const depotId = steamDepotIds[platform.metadataKey];
     if (!depotId) {
       continue;
     }
@@ -182,6 +253,7 @@ async function resolveDepotDefinitions(options, contentRoot) {
 async function main() {
   const { values } = parseArgs({
     options: {
+      'release-input': { type: 'string' },
       plan: { type: 'string' },
       'content-root': { type: 'string' },
       'output-dir': { type: 'string' },
@@ -198,12 +270,22 @@ async function main() {
     strict: true
   });
 
-  if (!values.plan || !values['content-root'] || !values['app-id']) {
-    throw new Error('publish-steam requires --plan, --content-root, and --app-id.');
+  if (!values['app-id']) {
+    throw new Error('publish-steam requires --app-id.');
   }
 
-  const plan = await readJson(path.resolve(values.plan));
-  const contentRoot = path.resolve(values['content-root']);
+  const releaseInput = values['release-input']
+    ? await loadReleaseInput(values['release-input'])
+    : null;
+  const planPath = releaseInput?.planPath ?? values.plan;
+  const contentRootValue = releaseInput?.contentRoot ?? values['content-root'];
+
+  if (!planPath || !contentRootValue) {
+    throw new Error('publish-steam requires either --release-input or both --plan and --content-root.');
+  }
+
+  const plan = await readJson(path.resolve(planPath));
+  const contentRoot = path.resolve(contentRootValue);
   const outputDir = path.resolve(values['output-dir'] ?? path.join(contentRoot, '..', 'steam-build'));
   const buildOutputDir = path.join(outputDir, 'build-output');
   const scriptsDir = path.join(outputDir, 'scripts');
@@ -214,7 +296,8 @@ async function main() {
     throw new Error(`Steam content root does not exist at ${contentRoot}.`);
   }
 
-  const depotDefinitions = await resolveDepotDefinitions(values, contentRoot);
+  const steamDepotIds = releaseInput?.steamDepotIds ?? resolveCliSteamDepotIds(values);
+  const depotDefinitions = await resolveDepotDefinitions(steamDepotIds, contentRoot);
   const description =
     values.description?.trim() || buildDefaultDescription(plan, depotDefinitions, values.branch);
 
@@ -243,12 +326,20 @@ async function main() {
   const manifestPath = path.join(outputDir, 'steam-build-manifest.json');
   await writeJson(manifestPath, {
     releaseTag: plan.release.tag,
-    planPath: path.resolve(values.plan),
+    planPath: path.resolve(planPath),
+    releaseInputPath: releaseInput?.sourcePath ?? null,
     appId: values['app-id'],
     description,
     preview,
     branch: values.branch.trim() || null,
     dryRun,
+    azureRelease: releaseInput
+      ? {
+          requestedReleaseTag: releaseInput.releaseTag,
+          index: releaseInput.azureIndex,
+          steamDepotIds
+        }
+      : null,
     depots: depotDefinitions.map(({ depotId, platform, sourcePlatform, contentRoot: root, vdfPath }) => ({
       depotId,
       platform,
@@ -266,6 +357,12 @@ async function main() {
       `- Release tag: ${plan.release.tag}`,
       `- App ID: ${values['app-id']}`,
       `- Preview mode: ${preview ? 'enabled' : 'disabled'}`,
+      ...(releaseInput
+        ? [
+            `- Azure release tag: ${releaseInput.releaseTag}`,
+            `- Azure root index: ${releaseInput.azureIndex?.sanitizedUrl ?? '[missing-azure-index-context]'}`
+          ]
+        : []),
       `- Depot count: ${depotDefinitions.length}`,
       `- Depot platforms: ${depotDefinitions.map((depot) => depot.platform).join(', ')}`,
       `- Content root: ${contentRoot}`,
@@ -324,6 +421,12 @@ async function main() {
     `- Release tag: ${plan.release.tag}`,
     `- App ID: ${values['app-id']}`,
     `- Preview mode: ${preview ? 'enabled' : 'disabled'}`,
+    ...(releaseInput
+      ? [
+          `- Azure release tag: ${releaseInput.releaseTag}`,
+          `- Azure root index: ${releaseInput.azureIndex?.sanitizedUrl ?? '[missing-azure-index-context]'}`
+        ]
+      : []),
     `- Depot count: ${depotDefinitions.length}`,
     `- Depot platforms: ${depotDefinitions.map((depot) => depot.platform).join(', ')}`,
     `- Steam login mode: ${hasSavedSteamLogin ? 'reused saved SteamCMD token' : 'bootstrapped and saved new SteamCMD token'}`,
