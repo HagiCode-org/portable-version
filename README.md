@@ -13,7 +13,7 @@ This repository now keeps only the Steam publication workflows:
 
 Packaging and Azure publication are no longer triggered from `portable-version`. If an external caller still wants the normalized selector and handoff contract, call `scripts/resolve-build-plan.mjs` directly and hand the resulting plan to `repos/steam_packer`.
 
-The base Steam workflow is `workflow_dispatch` only and requires an explicit `release` tag for every run. The DLC Steam workflow is also `workflow_dispatch`, but it does not accept a `release` input because it always discovers the latest version for every DLC from the DLC root index.
+The base Steam workflow is `workflow_dispatch` only and accepts an optional `release` tag. If you leave it blank, the workflow resolves the latest Azure-published Portable Version release from `hagicode-steam/index.json`. The DLC Steam workflow is also `workflow_dispatch`, but it does not accept a `release` input because it always discovers the latest version for every DLC from the DLC root index.
 
 ## Workflow inputs
 
@@ -21,7 +21,7 @@ The base Steam workflow is `workflow_dispatch` only and requires an explicit `re
 
 `portable-version-steam-release` accepts these `workflow_dispatch` inputs:
 
-- `release`: required Portable Version release tag to hydrate and publish to Steam. The workflow does not infer "latest".
+- `release`: optional Portable Version release tag to hydrate and publish to Steam. Leave it blank to publish the latest version entry from the Portable Version Azure root index.
 - `steam_preview`: generate a Steam preview build instead of publishing and setting the beta branch live.
 - `steam_branch`: Steam branch to set live for non-preview uploads. This defaults to `beta`.
 - `steam_description`: optional Steam build description override.
@@ -189,7 +189,7 @@ The automation currently assumes:
 
 Steam publication hydrates its input from an existing Azure-hosted Portable Version release instead of package-job artifacts or GitHub Release assets. `portable-version-steam-release` now:
 
-1. validates the required `release` input against `hagicode-steam/index.json`
+1. resolves the requested `release` input against `hagicode-steam/index.json`, or picks the latest available version entry when `release` is omitted
 2. downloads the Azure-hosted build manifest, artifact inventory, and checksums referenced by the matched version entry
 3. downloads each published Portable Version archive referenced by the root index and artifact inventory
 4. reconstructs `steam-content/<platform>` from those archives, using `steam-content/osx-universal` for the unified macOS depot when available
@@ -197,11 +197,12 @@ Steam publication hydrates its input from an existing Azure-hosted Portable Vers
 6. generates app and depot VDF scripts under `steam-build/scripts/`
 7. saves the initial SteamCMD login token under the persistent SteamCMD root and reuses that token on future runs
 8. derives a Steam Guard code from `STEAM_SHARED_SECRET` when available, otherwise uses `STEAM_GUARD_CODE` if provided
-9. runs `steamcmd +run_app_build` in preview or publish mode
+9. writes `metadata/steam-release-input.json` with both the requested selector and the resolved effective release
+10. runs `steamcmd +run_app_build` in preview or publish mode
 
 `steam_preview=false` uploads the build while setting `beta` live unless you override `steam_branch`. `steam_preview=true` keeps the Steam upload in preview mode so you can validate depot mappings and authentication without pushing a live update; preview runs do not pass `setlive` even if `steam_branch` is populated.
 
-If the selected release is missing the build manifest, merged artifact inventory, depot mapping, or one of the required platform archives, the workflow fails before any Steam login happens. That usually means the Azure root index entry is incomplete or the Azure version directory is only partially published and should be republished first.
+If the selected release is missing the build manifest, merged artifact inventory, depot mapping, or one of the required platform archives, the workflow fails before any Steam login happens. The same fail-fast rule applies when `release` is omitted but the Azure root index is empty or malformed. That usually means the Azure root index entry is incomplete or the Azure version directory is only partially published and should be republished first.
 
 The DLC Steam publication flow is separate and latest-driven. `portable-version-steam-dlc-release` now:
 
