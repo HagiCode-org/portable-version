@@ -537,6 +537,22 @@ export function resolvePortableVersionIndexEntryByReleaseTag({
   return matchedEntry;
 }
 
+export function resolveLatestPortableVersionIndexEntry({
+  document,
+  sanitizedIndexUrl = '[unknown-portable-version-index]'
+} = {}) {
+  const normalizedDocument = validatePortableVersionRootIndexDocument(document, { sanitizedIndexUrl });
+  const [latestEntry] = normalizedDocument.versions;
+
+  if (!latestEntry) {
+    throw new Error(
+      `Portable Version root index ${sanitizedIndexUrl} does not contain any publishable versions.`
+    );
+  }
+
+  return latestEntry;
+}
+
 export async function fetchPortableVersionRootIndex({ sasUrl, fetchImpl = fetch } = {}) {
   const indexUrl = buildPortableVersionRootIndexUrl(sasUrl);
   const sanitizedIndexUrl = sanitizeUrlForLogs(indexUrl);
