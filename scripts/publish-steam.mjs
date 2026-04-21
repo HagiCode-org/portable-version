@@ -165,6 +165,11 @@ function requireNonEmptyString(value, label) {
   return normalized;
 }
 
+function normalizeOptionalString(value) {
+  const normalized = String(value ?? '').trim();
+  return normalized || null;
+}
+
 function normalizeSteamDepotIds(steamDepotIds, { sourceLabel, requireAllPlatforms }) {
   const normalized = {};
 
@@ -229,7 +234,15 @@ async function loadReleaseInput(releaseInputPath) {
   return {
     mode: 'base',
     sourcePath: resolvedPath,
-    releaseTag: requireNonEmptyString(releaseInput?.releaseTag, 'release-input.releaseTag'),
+    releaseTag: requireNonEmptyString(
+      releaseInput?.resolvedReleaseTag ?? releaseInput?.releaseTag,
+      'release-input.resolvedReleaseTag'
+    ),
+    requestedReleaseTag: normalizeOptionalString(releaseInput?.requestedReleaseTag),
+    resolvedReleaseTag: requireNonEmptyString(
+      releaseInput?.resolvedReleaseTag ?? releaseInput?.releaseTag,
+      'release-input.resolvedReleaseTag'
+    ),
     planPath: path.resolve(requireNonEmptyString(releaseInput?.buildManifestPath, 'release-input.buildManifestPath')),
     contentRoot: path.resolve(requireNonEmptyString(releaseInput?.contentRoot, 'release-input.contentRoot')),
     steamDepotIds: normalizeSteamDepotIds(releaseInput?.steamDepotIds, {
@@ -548,7 +561,8 @@ async function main() {
     dryRun,
     azureRelease: releaseInput?.mode === 'base'
       ? {
-          requestedReleaseTag: releaseInput.releaseTag,
+          requestedReleaseTag: releaseInput.requestedReleaseTag,
+          resolvedReleaseTag: releaseInput.resolvedReleaseTag,
           index: releaseInput.azureIndex,
           steamDepotIds
         }
@@ -617,7 +631,8 @@ async function main() {
         ? [
             ...(releaseInput.mode === 'base'
               ? [
-                  `- Azure release tag: ${releaseInput.releaseTag}`,
+                  `- Azure requested release tag: ${releaseInput.requestedReleaseTag ?? '[latest]'}`,
+                  `- Azure resolved release tag: ${releaseInput.resolvedReleaseTag}`,
                   `- Azure root index: ${releaseInput.azureIndex?.sanitizedUrl ?? '[missing-azure-index-context]'}`
                 ]
               : [
@@ -702,7 +717,8 @@ async function main() {
       ? [
           ...(releaseInput.mode === 'base'
             ? [
-                `- Azure release tag: ${releaseInput.releaseTag}`,
+                `- Azure requested release tag: ${releaseInput.requestedReleaseTag ?? '[latest]'}`,
+                `- Azure resolved release tag: ${releaseInput.resolvedReleaseTag}`,
                 `- Azure root index: ${releaseInput.azureIndex?.sanitizedUrl ?? '[missing-azure-index-context]'}`
               ]
             : [

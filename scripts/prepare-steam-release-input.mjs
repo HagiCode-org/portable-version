@@ -7,6 +7,7 @@ import {
   buildSignedBlobUrl,
   downloadFromSource,
   fetchPortableVersionRootIndex,
+  resolveLatestPortableVersionIndexEntry,
   resolvePortableVersionIndexEntryByReleaseTag
 } from './lib/azure-blob.mjs';
 import { cleanDir, readJson, writeJson } from './lib/fs-utils.mjs';
@@ -18,12 +19,9 @@ const REQUIRED_ARCHIVE_PLATFORMS = [
   { platform: 'osx-universal', metadataKey: 'macos', optionalAlternatives: ['osx-x64', 'osx-arm64'] }
 ];
 
-function normalizeReleaseTag(value) {
+function normalizeOptionalReleaseTag(value) {
   const normalized = String(value ?? '').trim();
-  if (!normalized) {
-    throw new Error('Steam release hydration requires a non-empty --release value.');
-  }
-  return normalized;
+  return normalized || null;
 }
 
 function requireNonEmptyString(value, label) {
@@ -119,12 +117,28 @@ export async function prepareSteamReleaseInput({
   steamAzureSasUrl = process.env.PORTABLE_VERSION_STEAM_AZURE_SAS_URL,
   fetchImpl = fetch
 } = {}) {
-  const normalizedReleaseTag = normalizeReleaseTag(releaseTag);
+  const requestedReleaseTag = normalizeOptionalReleaseTag(releaseTag);
   const normalizedSteamAzureSasUrl = requireNonEmptyString(
     steamAzureSasUrl,
     'PORTABLE_VERSION_STEAM_AZURE_SAS_URL'
   );
-  const workspaceRoot = path.resolve(outputDir ?? path.join('build', 'steam-release', normalizedReleaseTag));
+
+  const rootIndex = await fetchPortableVersionRootIndex({
+    sasUrl: normalizedSteamAzureSasUrl,
+    fetchImpl
+  });
+  const releaseEntry = requestedReleaseTag
+    ? resolvePortableVersionIndexEntryByReleaseTag({
+        document: rootIndex.document,
+        releaseTag: requestedReleaseTag,
+        sanitizedIndexUrl: rootIndex.sanitizedIndexUrl
+      })
+    : resolveLatestPortableVersionIndexEntry({
+        document: rootIndex.document,
+        sanitizedIndexUrl: rootIndex.sanitizedIndexUrl
+      });
+  const resolvedReleaseTag = releaseEntry.version;
+  const workspaceRoot = path.resolve(outputDir ?? path.join('build', 'steam-release', resolvedReleaseTag));
   const metadataDir = path.join(workspaceRoot, 'metadata');
   const assetsDir = path.join(workspaceRoot, 'release-assets');
   const contentRoot = path.join(workspaceRoot, 'steam-content');
@@ -132,16 +146,6 @@ export async function prepareSteamReleaseInput({
   await cleanDir(metadataDir);
   await cleanDir(assetsDir);
   await cleanDir(contentRoot);
-
-  const rootIndex = await fetchPortableVersionRootIndex({
-    sasUrl: normalizedSteamAzureSasUrl,
-    fetchImpl
-  });
-  const releaseEntry = resolvePortableVersionIndexEntryByReleaseTag({
-    document: rootIndex.document,
-    releaseTag: normalizedReleaseTag,
-    sanitizedIndexUrl: rootIndex.sanitizedIndexUrl
-  });
 
   const buildManifestPath = path.join(metadataDir, path.basename(releaseEntry.metadata.buildManifestPath));
   const artifactInventoryPath = path.join(metadataDir, path.basename(releaseEntry.metadata.artifactInventoryPath));
@@ -165,9 +169,9 @@ export async function prepareSteamReleaseInput({
 
   const buildManifest = await readJson(buildManifestPath);
   const artifactInventory = await readJson(artifactInventoryPath);
-  ensureReleaseTagMatches(normalizedReleaseTag, buildManifest, artifactInventory);
+  ensureReleaseTagMatches(resolvedReleaseTag, buildManifest, artifactInventory);
 
-  const hydrationAssets = resolveHydrationAssets(normalizedReleaseTag, releaseEntry, artifactInventory);
+  const hydrationAssets = resolveHydrationAssets(resolvedReleaseTag, releaseEntry, artifactInventory);
   for (const asset of hydrationAssets) {
     const downloadedArchivePath = path.join(assetsDir, asset.fileName);
     const platformContentRoot = path.join(contentRoot, asset.platform);
@@ -181,7 +185,9 @@ export async function prepareSteamReleaseInput({
   }
 
   const result = {
-    releaseTag: normalizedReleaseTag,
+    releaseTag: resolvedReleaseTag,
+    requestedReleaseTag,
+    resolvedReleaseTag,
     buildManifestPath,
     artifactInventoryPath,
     checksumsPath,
@@ -205,7 +211,8 @@ export async function prepareSteamReleaseInput({
 
   await appendSummary([
     '## Portable Version Steam release hydration complete',
-    `- Release tag: ${normalizedReleaseTag}`,
+    `- Requested release tag: ${requestedReleaseTag ?? '[latest]'}`,
+    `- Resolved release tag: ${resolvedReleaseTag}`,
     `- Azure root index: ${result.azureIndex.sanitizedUrl}`,
     `- Azure version entry: ${result.azureIndex.version}`,
     `- Depot platforms: ${Object.keys(result.steamDepotIds).join(', ')}`,
@@ -239,6 +246,8 @@ async function main() {
     JSON.stringify(
       {
         releaseTag: result.releaseTag,
+        requestedReleaseTag: result.requestedReleaseTag,
+        resolvedReleaseTag: result.resolvedReleaseTag,
         buildManifestPath: result.buildManifestPath,
         artifactInventoryPath: result.artifactInventoryPath,
         checksumsPath: result.checksumsPath,
