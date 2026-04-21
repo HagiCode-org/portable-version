@@ -174,8 +174,7 @@ export async function buildPlan({
     handoff: {
       schema: PORTABLE_VERSION_HANDOFF_SCHEMA,
       producer: {
-        repository: producerRepository,
-        workflow: 'portable-version-release'
+        repository: producerRepository
       },
       consumer: {
         repository: 'HagiCode-org/steam_packer',

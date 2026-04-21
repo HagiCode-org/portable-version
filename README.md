@@ -1,40 +1,21 @@
 # portable-version
 
-This repository is the orchestration entrypoint for Portable Version releases. It resolves upstream Desktop and Server versions, derives the normalized release tag, emits a machine-readable handoff payload, and delegates packaging plus Azure publication to `repos/steam_packer`.
+This repository owns Steam publication for Portable Version and DLC releases. It still provides the build-plan / handoff helpers used by external automation, but packaging plus Azure publication now execute directly in `repos/steam_packer`.
 
 The actual packaging-safe workspace assembly, payload injection, toolchain staging, archive repacking, artifact inventory generation, checksum generation, Azure Blob upload, and root `hagicode-steam/index.json` refresh now execute in `steam_packer`.
 
 ## Trigger modes
 
-Packaging and Steam publication use separate workflows:
+This repository now keeps only the Steam publication workflows:
 
-- `.github/workflows/portable-version-build.yml` (`portable-version-release`) handles build-plan resolution and delegated packaging/publication orchestration.
 - `.github/workflows/portable-version-steam-release.yml` (`portable-version-steam-release`) manually publishes an existing Azure-hosted Portable Version release to Steam.
 - `.github/workflows/portable-version-steam-dlc-release.yml` (`portable-version-steam-dlc-release`) manually discovers every DLC from the dedicated DLC Azure container and publishes the latest version of each DLC to Steam.
 
-The release workflow supports three non-interactive entrypoints:
-
-- `schedule` polls the Desktop and Server index manifests on a daily cadence.
-- `workflow_dispatch` supports targeted rebuilds with optional Desktop selector, service selector, platform, dry-run, and force-rebuild inputs.
-- `repository_dispatch` accepts `client_payload` fields (`serviceTag`, optional `desktopTag`, `platforms`, `forceRebuild`, `dryRun`). `serviceTag` is required so the automation stays non-interactive, while `desktopTag` falls back to the default Desktop resolution path when omitted.
-
-Packaging-oriented runs stop after producing the handoff artifact plus the delegated reusable-workflow call. Steam publication remains a separate manual workflow and is not triggered by packaging runs.
+Packaging and Azure publication are no longer triggered from `portable-version`. If an external caller still wants the normalized selector and handoff contract, call `scripts/resolve-build-plan.mjs` directly and hand the resulting plan to `repos/steam_packer`.
 
 The base Steam workflow is `workflow_dispatch` only and requires an explicit `release` tag for every run. The DLC Steam workflow is also `workflow_dispatch`, but it does not accept a `release` input because it always discovers the latest version for every DLC from the DLC root index.
 
 ## Workflow inputs
-
-### Portable Version release workflow
-
-`portable-version-release` accepts these `workflow_dispatch` inputs:
-
-- `desktop_tag`: optional Desktop version selector. `refs/tags/v0.1.34`, `v0.1.34`, and `0.1.34` are normalized to the same selector.
-- `service_tag`: optional Server version selector. `refs/tags/v0.1.0-beta.35`, `v0.1.0-beta.35`, and `0.1.0-beta.35` are normalized to the same selector. In the release-tag convention described below, this current service payload version is treated as the "Web" component.
-- `platforms`: comma-separated platforms. Supported values are `linux-x64`, `win-x64`, `osx-universal`, `osx-x64`, `osx-arm64`, or `all`.
-- `force_rebuild`: keep packaging even if the derived Portable Version Azure release already exists.
-- `dry_run`: skip Azure publication while still resolving and delegating the packaging plan.
-
-When no selector is provided, the build plan resolves the latest indexed Desktop version and the latest indexed Server version.
 
 ### Steam publication workflow
 
@@ -63,8 +44,7 @@ Portable Version releases use a readable Web-driven tag:
 - current mapping: `web-tag` means the selected `service_tag` / `PCode.Web` payload version
 - `desktop_tag` remains available as an optional source-selection override, but it only affects Desktop asset resolution and provenance
 - normalization rule: `refs/tags/v0.1.0-beta.35`, `v0.1.0-beta.35`, and `0.1.0-beta.35` all normalize to `v0.1.0-beta.35`
-- `workflow_dispatch` example: `service_tag=0.1.0-beta.35` plus `desktop_tag=refs/tags/v0.1.34` still produces release tag `v0.1.0-beta.35`
-- `repository_dispatch` example: `{"event_type":"portable-version-build","client_payload":{"serviceTag":"0.1.0-beta.35"}}` resolves the latest Desktop release and still produces `v0.1.0-beta.35`
+- direct helper example: `node scripts/resolve-build-plan.mjs --event-name workflow_dispatch --event-path <event-json>` still normalizes `service_tag=0.1.0-beta.35` and `desktop_tag=refs/tags/v0.1.34` into release tag `v0.1.0-beta.35`
 
 The same Web-only tag is reused for duplicate detection, Azure version directories, root-index entries, dry-run metadata filenames, and Steam hydration.
 
@@ -77,7 +57,7 @@ Portable Version uses four Azure-backed data surfaces:
 - Portable Version publication container: `hagicode-steam`
 - DLC publication container: a dedicated Azure Blob container addressed by `PORTABLE_VERSION_DLC_AZURE_SAS_URL`
 
-The resolve step reads the Desktop and Server manifests, picks the selected version entries, records the matched platform assets, and emits a delegated handoff payload for `steam_packer`. The delegated workflow then downloads the raw archives by combining:
+The build-plan helper reads the Desktop and Server manifests, picks the selected version entries, records the matched platform assets, and emits a delegated handoff payload for `steam_packer`. The delegated workflow then downloads the raw archives by combining:
 
 - the asset `path` from the index manifest
 - the Desktop Azure Blob SAS container URL from `PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL`
@@ -176,12 +156,8 @@ Recommended repository secrets:
 
 - `PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL`: Desktop Azure Blob container SAS URL with at least `Read` and `List` permissions.
 - `PORTABLE_VERSION_SERVICE_AZURE_SAS_URL`: Server Azure Blob container SAS URL with at least `Read` and `List` permissions.
-- `PORTABLE_VERSION_STEAM_AZURE_SAS_URL`: Azure Blob SAS URL for the `hagicode-steam` container. The release workflow needs `Read`, `List`, `Write`, and `Create`; the Steam workflow only needs `Read` and `List`.
+- `PORTABLE_VERSION_STEAM_AZURE_SAS_URL`: Azure Blob SAS URL for the `hagicode-steam` container. `portable-version` Steam workflows only need `Read` and `List`; packaging/publication writes now happen in `steam_packer`.
 - `PORTABLE_VERSION_DLC_AZURE_SAS_URL`: Azure Blob SAS URL for the dedicated DLC container. The DLC Steam workflow needs `Read` and `List`.
-- `STEAM_DEPOT_ID_LINUX`: depot id for Linux builds. The release workflow writes this into the root index and the Steam workflow consumes it from there.
-- `STEAM_DEPOT_ID_WINDOWS`: depot id for Windows builds.
-- `STEAM_DEPOT_ID_MACOS`: depot id for the unified macOS build.
-- `STEAM_APP_ID`: Steam app id for the Desktop product.
 - `STEAM_USERNAME`: Steam build account name.
 - `STEAM_PASSWORD`: Steam build account password.
 - `STEAM_SHARED_SECRET`: optional Steam Guard shared secret for fully unattended uploads.
@@ -193,7 +169,6 @@ Optional repository variables:
 
 Workflow permissions are set to:
 
-- `portable-version-release`: `contents: write`, `actions: read`
 - `portable-version-steam-release`: `contents: read`
 - `portable-version-steam-dlc-release`: `contents: read`
 
@@ -284,16 +259,14 @@ If you have external tooling that consumed GitHub Release assets, migrate it to:
 
 Use these recovery paths when a workflow run fails or must be replayed:
 
-1. Re-run `portable-version-release` with `dry_run=true` to confirm index resolution, payload staging, repacking, and Azure publication planning without writing blobs.
-2. If the derived Portable Version Azure version directory already exists but the prior upload was partial, re-run with `force_rebuild=true`.
-3. If a specific upstream build must be replayed, provide `service_tag` and optionally `desktop_tag` when you need to pin a non-default Desktop asset.
-4. Inspect the uploaded workflow artifacts:
-   - `steam-packer-build-plan`
+1. For packaging or Azure publication replay, run the corresponding workflow or script in `repos/steam_packer`.
+2. If a specific upstream build must be replayed with normalized selectors, regenerate the handoff plan via `node scripts/resolve-build-plan.mjs` and pass that plan into `steam_packer`.
+3. Inspect the uploaded workflow artifacts:
    - `portable-release-metadata-<release-tag>`
    - `portable-steam-release-preparation-<release-tag>`
    - `portable-steam-build-metadata-<release-tag>`
-5. For delegated packaging failures, inspect the `steam_packer` reusable workflow jobs and the delegated summary output before changing anything in `portable-version`.
-6. Review the workflow summary for the exact selector mismatch, delegated packaging failure, Azure upload failure, root-index refresh failure, archive hydration failure, Steam authentication issue, or SteamCMD publication error.
+4. For delegated packaging failures, inspect the `steam_packer` workflow jobs and delegated summary output before changing anything in `portable-version`.
+5. Review the workflow summary for the exact selector mismatch, delegated packaging failure, Azure upload failure, root-index refresh failure, archive hydration failure, Steam authentication issue, or SteamCMD publication error.
 
 ## Derived release outputs
 
@@ -306,4 +279,4 @@ Each successful build publishes:
 - merged SHA-256 checksums
 - one root-index entry containing `metadata.*`, `steamDepotIds.*`, and `artifacts[]`
 - one toolchain validation report per platform, proving the bundled `node`, `openspec`, and `opsx` commands executed successfully before publication
-For DLC publication, `STEAM_APP_ID` is not used. Each DLC latest version must provide its own `steamAppId` in the DLC root `index.json`.
+For DLC publication, no repository-level app id secret is used. Each DLC latest version must provide its own `steamAppId` in the DLC root `index.json`.
