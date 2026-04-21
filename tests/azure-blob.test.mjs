@@ -6,6 +6,7 @@ import {
   fetchPortableVersionRootIndex,
   normalizePortableVersionVersionEntry,
   resolveAssetDownloadUrl,
+  resolveLatestPortableVersionIndexEntry,
   resolvePortableVersionIndexEntryByReleaseTag,
   sanitizeUrlForLogs,
   uploadAzureBlob,
@@ -210,5 +211,37 @@ test('resolvePortableVersionIndexEntryByReleaseTag reports the sanitized index u
         sanitizedIndexUrl: 'https://example.blob.core.windows.net/hagicode-steam/index.json?<sas-token-redacted>'
       }),
     /does not contain version "v0.1.0-beta.40"/
+  );
+});
+
+test('resolveLatestPortableVersionIndexEntry returns the highest normalized version entry', () => {
+  const latest = resolveLatestPortableVersionIndexEntry({
+    document: {
+      schemaVersion: 1,
+      generatedAt: '2026-04-18T00:00:00.000Z',
+      versions: [
+        createVersionEntry({ version: 'v0.1.0-beta.31' }),
+        createVersionEntry({ version: 'v0.1.0-beta.35' }),
+        createVersionEntry({ version: 'v0.1.0-beta.33' })
+      ]
+    },
+    sanitizedIndexUrl: 'https://example.blob.core.windows.net/hagicode-steam/index.json?<sas-token-redacted>'
+  });
+
+  assert.equal(latest.version, 'v0.1.0-beta.35');
+});
+
+test('resolveLatestPortableVersionIndexEntry fails when the root index has no versions', () => {
+  assert.throws(
+    () =>
+      resolveLatestPortableVersionIndexEntry({
+        document: {
+          schemaVersion: 1,
+          generatedAt: '2026-04-18T00:00:00.000Z',
+          versions: []
+        },
+        sanitizedIndexUrl: 'https://example.blob.core.windows.net/hagicode-steam/index.json?<sas-token-redacted>'
+      }),
+    /does not contain any publishable versions/
   );
 });

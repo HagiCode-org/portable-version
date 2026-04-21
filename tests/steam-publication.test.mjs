@@ -15,15 +15,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const defaultReleaseTag = 'v0.1.0-beta.33';
 const steamSasUrl = 'https://example.blob.core.windows.net/hagicode-steam?sp=rl&sig=test-token';
 const dlcSteamSasUrl = 'https://example.blob.core.windows.net/hagicode-steam-dlc?sp=rl&sig=test-token';
+const defaultSteamDepotIds = {
+  linux: '7654322',
+  windows: '7654323',
+  macos: '7654324'
+};
 
-function createPortableRootIndex({
-  releaseTag = defaultReleaseTag,
-  steamDepotIds = {
-    linux: '7654322',
-    windows: '7654323',
-    macos: '7654324'
-  },
-  artifacts = [
+function createPortableReleaseArtifacts(releaseTag) {
+  return [
     {
       platform: 'linux-x64',
       name: 'hagicode-portable-linux-x64.zip',
@@ -39,24 +38,129 @@ function createPortableRootIndex({
       name: 'hagicode-portable-win-x64.zip',
       path: `${releaseTag}/hagicode-portable-win-x64.zip`
     }
-  ]
+  ];
+}
+
+function createPortableVersionIndexEntry({
+  releaseTag = defaultReleaseTag,
+  steamDepotIds = defaultSteamDepotIds,
+  artifacts = createPortableReleaseArtifacts(releaseTag)
+} = {}) {
+  return {
+    version: releaseTag,
+    metadata: {
+      buildManifestPath: `${releaseTag}/${releaseTag}.build-manifest.json`,
+      artifactInventoryPath: `${releaseTag}/${releaseTag}.artifact-inventory.json`,
+      checksumsPath: `${releaseTag}/${releaseTag}.checksums.txt`
+    },
+    steamDepotIds,
+    artifacts
+  };
+}
+
+function createPortableRootIndex({
+  releaseTag = defaultReleaseTag,
+  steamDepotIds = defaultSteamDepotIds,
+  artifacts = createPortableReleaseArtifacts(releaseTag),
+  versions
 } = {}) {
   return {
     schemaVersion: 1,
     generatedAt: '2026-04-18T12:00:00Z',
-    versions: [
-      {
-        version: releaseTag,
-        metadata: {
-          buildManifestPath: `${releaseTag}/${releaseTag}.build-manifest.json`,
-          artifactInventoryPath: `${releaseTag}/${releaseTag}.artifact-inventory.json`,
-          checksumsPath: `${releaseTag}/${releaseTag}.checksums.txt`
-        },
+    versions: versions ?? [
+      createPortableVersionIndexEntry({
+        releaseTag,
         steamDepotIds,
         artifacts
-      }
+      })
     ]
   };
+}
+
+async function addPortableReleaseToFixture(
+  tempRoot,
+  files,
+  {
+    releaseTag = defaultReleaseTag,
+    includeWindowsArchive = true,
+    includeMacArchive = true,
+    steamDepotIds = defaultSteamDepotIds,
+    artifacts = createPortableReleaseArtifacts(releaseTag),
+    platformContents = {
+      linux: 'linux build',
+      windows: 'windows build',
+      macos: 'mac build'
+    }
+  } = {}
+) {
+  const linuxSource = path.join(tempRoot, `${releaseTag}-linux-source`);
+  const windowsSource = path.join(tempRoot, `${releaseTag}-windows-source`);
+  const macSource = path.join(tempRoot, `${releaseTag}-mac-source`);
+  const buildManifestPath = path.join(tempRoot, `${releaseTag}.build-manifest.json`);
+  const artifactInventoryPath = path.join(tempRoot, `${releaseTag}.artifact-inventory.json`);
+  const checksumsPath = path.join(tempRoot, `${releaseTag}.checksums.txt`);
+  const linuxArchivePath = path.join(tempRoot, `${releaseTag}-hagicode-portable-linux-x64.zip`);
+  const windowsArchivePath = path.join(tempRoot, `${releaseTag}-hagicode-portable-win-x64.zip`);
+  const macArchivePath = path.join(tempRoot, `${releaseTag}-hagicode-portable-osx-universal.zip`);
+
+  await mkdir(linuxSource, { recursive: true });
+  await mkdir(windowsSource, { recursive: true });
+  await mkdir(macSource, { recursive: true });
+  await writeFile(path.join(linuxSource, 'hagicode'), platformContents.linux, 'utf8');
+  await writeFile(path.join(windowsSource, 'hagicode.exe'), platformContents.windows, 'utf8');
+  await writeFile(path.join(macSource, 'Hagicode Desktop.app'), platformContents.macos, 'utf8');
+
+  await writeJson(buildManifestPath, {
+    upstream: {
+      desktop: { version: 'v0.2.0' },
+      service: { version: releaseTag.replace(/^v/, '') }
+    },
+    release: {
+      tag: releaseTag
+    }
+  });
+  await writeJson(artifactInventoryPath, {
+    releaseTag,
+    artifacts: artifacts.map((artifact) => ({
+      platform: artifact.platform,
+      fileName: artifact.name
+    }))
+  });
+  await writeFile(checksumsPath, 'abc123  hagicode-portable-linux-x64.zip\n', 'utf8');
+
+  await createArchive(linuxSource, linuxArchivePath);
+  await createArchive(windowsSource, windowsArchivePath);
+  await createArchive(macSource, macArchivePath);
+
+  files.set(`${releaseTag}/${releaseTag}.build-manifest.json`, await readFile(buildManifestPath));
+  files.set(`${releaseTag}/${releaseTag}.artifact-inventory.json`, await readFile(artifactInventoryPath));
+  files.set(`${releaseTag}/${releaseTag}.checksums.txt`, await readFile(checksumsPath));
+
+  const archivePayloads = new Map([
+    ['hagicode-portable-linux-x64.zip', await readFile(linuxArchivePath)],
+    ['hagicode-portable-win-x64.zip', await readFile(windowsArchivePath)],
+    ['hagicode-portable-osx-universal.zip', await readFile(macArchivePath)]
+  ]);
+
+  for (const artifact of artifacts) {
+    if (!includeWindowsArchive && artifact.platform === 'win-x64') {
+      continue;
+    }
+    if (!includeMacArchive && artifact.platform === 'osx-universal') {
+      continue;
+    }
+
+    const payload = archivePayloads.get(artifact.name);
+    if (payload) {
+      files.set(artifact.path, payload);
+    }
+  }
+
+  return createPortableVersionIndexEntry({
+    releaseTag,
+    steamDepotIds,
+    artifacts
+  });
 }
 
 function createAzureFetchFixture(blobs) {
@@ -85,80 +189,31 @@ async function createHydrationFixture({
   includeWindowsArchive = true,
   includeMacArchive = true,
   steamDepotIds,
-  artifacts
+  artifacts,
+  releaseDefinitions
 } = {}) {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'portable-version-steam-release-'));
-  const releaseTag = defaultReleaseTag;
-  const linuxSource = path.join(tempRoot, 'linux-source');
-  const windowsSource = path.join(tempRoot, 'windows-source');
-  const macSource = path.join(tempRoot, 'mac-source');
   const files = new Map();
-
-  await mkdir(linuxSource, { recursive: true });
-  await mkdir(windowsSource, { recursive: true });
-  await mkdir(macSource, { recursive: true });
-  await writeFile(path.join(linuxSource, 'hagicode'), 'linux build', 'utf8');
-  await writeFile(path.join(windowsSource, 'hagicode.exe'), 'windows build', 'utf8');
-  await writeFile(path.join(macSource, 'Hagicode Desktop.app'), 'mac build', 'utf8');
-
-  const buildManifestPath = path.join(tempRoot, `${releaseTag}.build-manifest.json`);
-  const artifactInventoryPath = path.join(tempRoot, `${releaseTag}.artifact-inventory.json`);
-  const checksumsPath = path.join(tempRoot, `${releaseTag}.checksums.txt`);
-  const linuxArchivePath = path.join(tempRoot, 'hagicode-portable-linux-x64.zip');
-  const windowsArchivePath = path.join(tempRoot, 'hagicode-portable-win-x64.zip');
-  const macArchivePath = path.join(tempRoot, 'hagicode-portable-osx-universal.zip');
-
-  await writeJson(buildManifestPath, {
-    upstream: {
-      desktop: { version: 'v0.2.0' },
-      service: { version: '0.1.0-beta.33' }
-    },
-    release: {
-      tag: releaseTag
-    }
-  });
-  await writeJson(artifactInventoryPath, {
-    releaseTag,
-    artifacts: [
+  const versions = [];
+  const normalizedReleaseDefinitions =
+    releaseDefinitions ?? [
       {
-        platform: 'linux-x64',
-        fileName: path.basename(linuxArchivePath)
-      },
-      {
-        platform: 'win-x64',
-        fileName: path.basename(windowsArchivePath)
-      },
-      {
-        platform: 'osx-universal',
-        fileName: path.basename(macArchivePath)
+        releaseTag: defaultReleaseTag,
+        includeWindowsArchive,
+        includeMacArchive,
+        steamDepotIds,
+        artifacts
       }
-    ]
-  });
-  await writeFile(checksumsPath, 'abc123  hagicode-portable-linux-x64.zip\n', 'utf8');
+    ];
 
-  await createArchive(linuxSource, linuxArchivePath);
-  await createArchive(windowsSource, windowsArchivePath);
-  await createArchive(macSource, macArchivePath);
-
-  files.set(`${releaseTag}/${releaseTag}.build-manifest.json`, await readFile(buildManifestPath));
-  files.set(`${releaseTag}/${releaseTag}.artifact-inventory.json`, await readFile(artifactInventoryPath));
-  files.set(`${releaseTag}/${releaseTag}.checksums.txt`, await readFile(checksumsPath));
-  files.set(`${releaseTag}/hagicode-portable-linux-x64.zip`, await readFile(linuxArchivePath));
-  if (includeWindowsArchive) {
-    files.set(`${releaseTag}/hagicode-portable-win-x64.zip`, await readFile(windowsArchivePath));
-  }
-  if (includeMacArchive) {
-    files.set(`${releaseTag}/hagicode-portable-osx-universal.zip`, await readFile(macArchivePath));
+  for (const definition of normalizedReleaseDefinitions) {
+    versions.push(await addPortableReleaseToFixture(tempRoot, files, definition));
   }
 
   return {
     tempRoot,
     fetchImpl: createAzureFetchFixture({
-      index: createPortableRootIndex({
-        releaseTag,
-        steamDepotIds,
-        artifacts
-      }),
+      index: createPortableRootIndex({ versions }),
       files
     })
   };
@@ -398,8 +453,32 @@ test('prepare-steam-release-input rejects unknown release tags', async () => {
   );
 });
 
-test('prepare-steam-release-input hydrates published Azure archives for standalone Steam publication', async () => {
-  const fixture = await createHydrationFixture();
+test('prepare-steam-release-input prefers an explicit release over the latest Azure version', async () => {
+  const fixture = await createHydrationFixture({
+    releaseDefinitions: [
+      {
+        releaseTag: defaultReleaseTag,
+        platformContents: {
+          linux: 'linux explicit',
+          windows: 'windows explicit',
+          macos: 'mac explicit'
+        }
+      },
+      {
+        releaseTag: 'v0.1.0-beta.34',
+        steamDepotIds: {
+          linux: '8654322',
+          windows: '8654323',
+          macos: '8654324'
+        },
+        platformContents: {
+          linux: 'linux latest',
+          windows: 'windows latest',
+          macos: 'mac latest'
+        }
+      }
+    ]
+  });
   const hydrationRoot = path.join(fixture.tempRoot, 'hydrated-release');
   const steamBuildOutput = path.join(fixture.tempRoot, 'steam-build');
 
@@ -410,6 +489,8 @@ test('prepare-steam-release-input hydrates published Azure archives for standalo
     fetchImpl: fixture.fetchImpl
   });
 
+  assert.equal(hydration.requestedReleaseTag, defaultReleaseTag);
+  assert.equal(hydration.resolvedReleaseTag, defaultReleaseTag);
   assert.deepEqual(hydration.preparedPlatforms, ['linux-x64', 'osx-universal', 'win-x64']);
   assert.deepEqual(hydration.steamDepotIds, {
     linux: '7654322',
@@ -418,11 +499,11 @@ test('prepare-steam-release-input hydrates published Azure archives for standalo
   });
   assert.equal(
     await readFile(path.join(hydration.contentRoot, 'linux-x64', 'hagicode'), 'utf8'),
-    'linux build'
+    'linux explicit'
   );
   assert.equal(
     await readFile(path.join(hydration.contentRoot, 'osx-universal', 'Hagicode Desktop.app'), 'utf8'),
-    'mac build'
+    'mac explicit'
   );
 
   await runCommand('node', [
@@ -448,11 +529,73 @@ test('prepare-steam-release-input hydrates published Azure archives for standalo
   assert.equal(manifest.releaseInputPath, path.join(hydrationRoot, 'metadata', 'steam-release-input.json'));
   assert.deepEqual(manifest.azureRelease, {
     requestedReleaseTag: defaultReleaseTag,
+    resolvedReleaseTag: defaultReleaseTag,
     index: hydration.azureIndex,
     steamDepotIds: hydration.steamDepotIds
   });
   assert.equal(manifest.depots[2].platform, 'macos');
   assert.equal(manifest.depots[2].sourcePlatform, 'osx-universal');
+});
+
+test('prepare-steam-release-input resolves the latest Azure version when release is omitted', async () => {
+  const latestReleaseTag = 'v0.1.0-beta.34';
+  const fixture = await createHydrationFixture({
+    releaseDefinitions: [
+      {
+        releaseTag: defaultReleaseTag,
+        platformContents: {
+          linux: 'linux older',
+          windows: 'windows older',
+          macos: 'mac older'
+        }
+      },
+      {
+        releaseTag: latestReleaseTag,
+        steamDepotIds: {
+          linux: '8654322',
+          windows: '8654323',
+          macos: '8654324'
+        },
+        platformContents: {
+          linux: 'linux latest',
+          windows: 'windows latest',
+          macos: 'mac latest'
+        }
+      }
+    ]
+  });
+  const hydrationRoot = path.join(fixture.tempRoot, 'hydrated-latest-release');
+
+  const hydration = await prepareSteamReleaseInput({
+    outputDir: hydrationRoot,
+    steamAzureSasUrl: steamSasUrl,
+    fetchImpl: fixture.fetchImpl
+  });
+
+  assert.equal(hydration.requestedReleaseTag, null);
+  assert.equal(hydration.releaseTag, latestReleaseTag);
+  assert.equal(hydration.resolvedReleaseTag, latestReleaseTag);
+  assert.equal(hydration.azureIndex.version, latestReleaseTag);
+  assert.deepEqual(hydration.steamDepotIds, {
+    linux: '8654322',
+    windows: '8654323',
+    macos: '8654324'
+  });
+  assert.equal(
+    await readFile(path.join(hydration.contentRoot, 'linux-x64', 'hagicode'), 'utf8'),
+    'linux latest'
+  );
+  assert.equal(
+    await readFile(path.join(hydration.contentRoot, 'osx-universal', 'Hagicode Desktop.app'), 'utf8'),
+    'mac latest'
+  );
+
+  const releaseInput = await readJson(
+    path.join(hydrationRoot, 'metadata', 'steam-release-input.json')
+  );
+  assert.equal(releaseInput.requestedReleaseTag, null);
+  assert.equal(releaseInput.resolvedReleaseTag, latestReleaseTag);
+  assert.equal(releaseInput.releaseTag, latestReleaseTag);
 });
 
 test('prepare-steam-release-input fails when the Azure release entry omits a depot mapping', async () => {
@@ -473,6 +616,45 @@ test('prepare-steam-release-input fails when the Azure release entry omits a dep
       }),
     /steamDepotIds\.macos/
   );
+});
+
+test('prepare-steam-release-input fails when no Azure-published version is available for omitted release', async () => {
+  let nonIndexRequestCount = 0;
+  const fetchImpl = async (url) => {
+    const parsed = new URL(url);
+    const blobPath = parsed.pathname.split('/').slice(2).join('/');
+    if (blobPath === 'index.json') {
+      return new Response(
+        JSON.stringify({
+          schemaVersion: 1,
+          generatedAt: '2026-04-18T12:00:00Z',
+          versions: []
+        }),
+        {
+          status: 200,
+          headers: {
+            'content-type': 'application/json'
+          }
+        }
+      );
+    }
+
+    nonIndexRequestCount += 1;
+    return new Response('unexpected', { status: 500 });
+  };
+
+  await assert.rejects(
+    async () => {
+      const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'portable-version-empty-index-'));
+      return prepareSteamReleaseInput({
+        outputDir: path.join(tempRoot, 'hydration'),
+        steamAzureSasUrl: steamSasUrl,
+        fetchImpl
+      });
+    },
+    /does not contain any publishable versions/
+  );
+  assert.equal(nonIndexRequestCount, 0);
 });
 
 test('prepare-steam-release-input fails when a required archive is missing from Azure', async () => {
