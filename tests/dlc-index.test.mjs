@@ -145,3 +145,32 @@ test('selectSteamArtifactsForPublication falls back to osx-x64 and osx-arm64 whe
     ['osx-x64', 'osx-arm64']
   );
 });
+
+test('selectSteamArtifactsForPublication ignores additional linux-arm64 artifacts when linux-x64 is present', () => {
+  const selected = selectSteamArtifactsForPublication([
+    {
+      name: 'hagicode-dlc-turbo-engine-0.1.0-beta.50-linux-arm64-nort.zip',
+      path: 'turbo-engine/0.1.0-beta.50/linux-arm64.zip'
+    },
+    {
+      name: 'hagicode-dlc-turbo-engine-0.1.0-beta.50-linux-x64-nort.zip',
+      path: 'turbo-engine/0.1.0-beta.50/linux-x64.zip'
+    },
+    {
+      name: 'hagicode-dlc-turbo-engine-0.1.0-beta.50-win-x64-nort.zip',
+      path: 'turbo-engine/0.1.0-beta.50/windows.zip'
+    },
+    {
+      name: 'hagicode-dlc-turbo-engine-0.1.0-beta.50-osx-x64-nort.zip',
+      path: 'turbo-engine/0.1.0-beta.50/osx-x64.zip'
+    },
+    {
+      name: 'hagicode-dlc-turbo-engine-0.1.0-beta.50-osx-arm64-nort.zip',
+      path: 'turbo-engine/0.1.0-beta.50/osx-arm64.zip'
+    }
+  ]);
+
+  assert.equal(selected.selectedArtifacts.linux.length, 1);
+  assert.equal(selected.selectedArtifacts.linux[0].platform, 'linux-x64');
+  assert.deepEqual(selected.preparedPlatforms, ['linux-x64', 'win-x64', 'osx-x64', 'osx-arm64']);
+});

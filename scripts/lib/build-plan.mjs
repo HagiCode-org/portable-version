@@ -14,10 +14,10 @@ import {
 const DEFAULT_REPOSITORIES = {
   desktop: DEFAULT_INDEX_SOURCES.desktop,
   service: DEFAULT_INDEX_SOURCES.service,
-  portable: 'HagiCode-org/portable-version'
+  portable: 'HagiCode-org/steam_packer'
 };
 
-export const PORTABLE_VERSION_HANDOFF_SCHEMA = 'portable-version-steam-packer-handoff/v1';
+export const PORTABLE_VERSION_HANDOFF_SCHEMA = 'steam-packer-handoff/v1';
 
 function normalizeBoolean(value, defaultValue = false) {
   if (value === undefined || value === null || value === '') {

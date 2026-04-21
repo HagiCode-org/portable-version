@@ -43,10 +43,9 @@ concurrency:
 
 env:
   DEFAULT_PLATFORMS: linux-x64,win-x64,osx-universal
-  PORTABLE_VERSION_GITHUB_TOKEN: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
-  PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL }}
-  PORTABLE_VERSION_SERVICE_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL }}
-  PORTABLE_VERSION_STEAM_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_STEAM_AZURE_SAS_URL }}
+  DESKTOP_AZURE_SAS_URL: ${{ secrets.STEAM_PACKER_DESKTOP_AZURE_SAS_URL || secrets.DESKTOP_AZURE_SAS_URL || secrets.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL }}
+  SERVICE_AZURE_SAS_URL: ${{ secrets.STEAM_PACKER_SERVICE_AZURE_SAS_URL || secrets.SERVICE_AZURE_SAS_URL || secrets.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL }}
+  STEAM_AZURE_SAS_URL: ${{ secrets.STEAM_PACKER_STEAM_AZURE_SAS_URL || secrets.STEAM_AZURE_SAS_URL || secrets.PORTABLE_VERSION_STEAM_AZURE_SAS_URL }}
 
 jobs:
   resolve:
@@ -73,7 +72,10 @@ jobs:
         working-directory: .
         shell: bash
         env:
-          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          STEAM_PACKER_DESKTOP_AZURE_SAS_URL: ${{ env.DESKTOP_AZURE_SAS_URL }}
+          STEAM_PACKER_SERVICE_AZURE_SAS_URL: ${{ env.SERVICE_AZURE_SAS_URL }}
+          STEAM_PACKER_STEAM_AZURE_SAS_URL: ${{ env.STEAM_AZURE_SAS_URL }}
         run: |
           cp "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/portable-version-event.json"
           node scripts/resolve-build-plan.mjs \
@@ -85,7 +87,7 @@ jobs:
       - name: Upload Portable Version release plan artifact
         uses: actions/upload-artifact@v6
         with:
-          name: portable-release-build-plan
+          name: steam-packer-build-plan
           path: ${{ runner.temp }}/build-plan.json
           if-no-files-found: error
 
@@ -95,12 +97,11 @@ jobs:
     if: needs.resolve.outputs.should_build == 'true'
     uses: HagiCode-org/steam_packer/.github/workflows/portable-version-package.yml@main
     with:
-      build_plan_artifact_name: portable-release-build-plan
+      build_plan_artifact_name: steam-packer-build-plan
     secrets:
-      portable_version_github_token: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
-      portable_version_desktop_azure_sas_url: ${{ secrets.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL }}
-      portable_version_service_azure_sas_url: ${{ secrets.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL }}
-      portable_version_steam_azure_sas_url: ${{ secrets.PORTABLE_VERSION_STEAM_AZURE_SAS_URL }}
+      desktop_azure_sas_url: ${{ secrets.STEAM_PACKER_DESKTOP_AZURE_SAS_URL || secrets.DESKTOP_AZURE_SAS_URL || secrets.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL }}
+      service_azure_sas_url: ${{ secrets.STEAM_PACKER_SERVICE_AZURE_SAS_URL || secrets.SERVICE_AZURE_SAS_URL || secrets.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL }}
+      steam_azure_sas_url: ${{ secrets.STEAM_PACKER_STEAM_AZURE_SAS_URL || secrets.STEAM_AZURE_SAS_URL || secrets.PORTABLE_VERSION_STEAM_AZURE_SAS_URL }}
       steam_depot_id_linux: ${{ secrets.STEAM_DEPOT_ID_LINUX }}
       steam_depot_id_windows: ${{ secrets.STEAM_DEPOT_ID_WINDOWS }}
       steam_depot_id_macos: ${{ secrets.STEAM_DEPOT_ID_MACOS }}

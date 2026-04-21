@@ -246,6 +246,7 @@ function detectArtifactPlatformFromString(value) {
   const haystack = String(value ?? '').toLowerCase();
   const candidates = [
     UNIVERSAL_MACOS_PLATFORM,
+    'linux-arm64',
     'linux-x64',
     'win-x64',
     'osx-arm64',

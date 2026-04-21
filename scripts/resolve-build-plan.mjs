@@ -28,25 +28,28 @@ async function main() {
   const eventName = values['event-name'] ?? process.env.GITHUB_EVENT_NAME ?? 'workflow_dispatch';
   const eventPath = values['event-path'] ?? process.env.GITHUB_EVENT_PATH;
   const outputPath = path.resolve(values.output ?? 'build/build-plan.json');
-  const token = values.token ?? process.env.PORTABLE_VERSION_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const token = values.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   const desktopAzureSasUrl =
     values['desktop-azure-sas-url'] ??
+    process.env.STEAM_PACKER_DESKTOP_AZURE_SAS_URL ??
+    process.env.DESKTOP_AZURE_SAS_URL ??
     process.env.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL ??
     process.env.DESKTOP_AZURE_BLOB_SAS_URL ??
-    process.env.PORTABLE_VERSION_AZURE_SAS_URL ??
     process.env.AZURE_BLOB_SAS_URL ??
     process.env.AZURE_SAS_URL;
   const serviceAzureSasUrl =
     values['service-azure-sas-url'] ??
+    process.env.STEAM_PACKER_SERVICE_AZURE_SAS_URL ??
+    process.env.SERVICE_AZURE_SAS_URL ??
     process.env.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL ??
     process.env.SERVICE_AZURE_BLOB_SAS_URL ??
-    process.env.PORTABLE_VERSION_AZURE_SAS_URL ??
     process.env.AZURE_BLOB_SAS_URL ??
     process.env.AZURE_SAS_URL;
   const steamAzureSasUrl =
     values['steam-azure-sas-url'] ??
+    process.env.STEAM_PACKER_STEAM_AZURE_SAS_URL ??
+    process.env.STEAM_AZURE_SAS_URL ??
     process.env.PORTABLE_VERSION_STEAM_AZURE_SAS_URL ??
-    process.env.PORTABLE_VERSION_AZURE_SAS_URL ??
     process.env.AZURE_BLOB_SAS_URL ??
     process.env.AZURE_SAS_URL;
   const defaultPlatforms = values['default-platforms']
@@ -55,7 +58,7 @@ async function main() {
 
   if (!desktopAzureSasUrl || !serviceAzureSasUrl) {
     throw new Error(
-      'resolve-build-plan requires both Desktop and Service Azure SAS URLs via --desktop-azure-sas-url/--service-azure-sas-url or PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL/PORTABLE_VERSION_SERVICE_AZURE_SAS_URL.'
+      'resolve-build-plan requires both Desktop and Service Azure SAS URLs via --desktop-azure-sas-url/--service-azure-sas-url or STEAM_PACKER_DESKTOP_AZURE_SAS_URL/STEAM_PACKER_SERVICE_AZURE_SAS_URL.'
     );
   }
 
@@ -63,9 +66,9 @@ async function main() {
   parseAzureSasUrl(serviceAzureSasUrl);
 
   const repositories = {
-    desktop: values['desktop-index-url'] ?? process.env.PORTABLE_VERSION_DESKTOP_INDEX_URL ?? DEFAULT_INDEX_SOURCES.desktop,
-    service: values['service-index-url'] ?? process.env.PORTABLE_VERSION_SERVICE_INDEX_URL ?? DEFAULT_INDEX_SOURCES.service,
-    portable: 'HagiCode-org/portable-version'
+    desktop: values['desktop-index-url'] ?? process.env.DESKTOP_INDEX_URL ?? process.env.PORTABLE_VERSION_DESKTOP_INDEX_URL ?? DEFAULT_INDEX_SOURCES.desktop,
+    service: values['service-index-url'] ?? process.env.SERVICE_INDEX_URL ?? process.env.PORTABLE_VERSION_SERVICE_INDEX_URL ?? DEFAULT_INDEX_SOURCES.service,
+    portable: 'HagiCode-org/steam_packer'
   };
 
   const eventPayload = eventPath ? await readJson(eventPath) : {};
@@ -88,7 +91,7 @@ async function main() {
 
   await writeGithubOutputs({
     plan_path: outputPath,
-    build_plan_artifact_name: 'portable-release-build-plan',
+    build_plan_artifact_name: 'steam-packer-build-plan',
     handoff_schema: PORTABLE_VERSION_HANDOFF_SCHEMA,
     release_tag: plan.release.tag,
     release_identity: 'web-only',
