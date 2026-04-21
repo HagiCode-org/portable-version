@@ -85,6 +85,7 @@ export async function buildPlan({
   eventPayload,
   token,
   repositories = DEFAULT_REPOSITORIES,
+  producerRepository = 'HagiCode-org/portable-version',
   defaultPlatforms,
   now = new Date().toISOString(),
   fetchImpl,
@@ -173,12 +174,12 @@ export async function buildPlan({
     handoff: {
       schema: PORTABLE_VERSION_HANDOFF_SCHEMA,
       producer: {
-        repository: repositories.portable,
+        repository: producerRepository,
         workflow: 'portable-version-release'
       },
       consumer: {
         repository: 'HagiCode-org/steam_packer',
-        workflow: 'portable-version-package'
+        workflow: 'package-release'
       },
       publication: {
         container: 'hagicode-steam',

@@ -95,7 +95,7 @@ jobs:
     name: Delegate packaging and Azure publication
     needs: resolve
     if: needs.resolve.outputs.should_build == 'true'
-    uses: HagiCode-org/steam_packer/.github/workflows/portable-version-package.yml@main
+    uses: HagiCode-org/steam_packer/.github/workflows/package-release.yml@main
     with:
       build_plan_artifact_name: steam-packer-build-plan
     secrets:
