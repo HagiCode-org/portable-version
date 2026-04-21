@@ -167,7 +167,9 @@ test('buildPlan resolves latest index versions and platform assets', async () =>
   assert.equal(plan.release.notesTitle, 'Portable Version v0.1.0-beta.35');
   assert.equal(plan.build.shouldBuild, true);
   assert.equal(plan.handoff.schema, PORTABLE_VERSION_HANDOFF_SCHEMA);
+  assert.equal(plan.handoff.producer.repository, 'HagiCode-org/portable-version');
   assert.equal(plan.handoff.consumer.repository, 'HagiCode-org/steam_packer');
+  assert.equal(plan.handoff.consumer.workflow, 'package-release');
   assert.equal(plan.handoff.publication.versionDirectory, 'v0.1.0-beta.35/');
 });
 

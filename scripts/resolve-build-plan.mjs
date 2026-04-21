@@ -79,6 +79,7 @@ async function main() {
     eventPayload,
     token,
     repositories,
+    producerRepository: process.env.GITHUB_REPOSITORY ?? 'HagiCode-org/portable-version',
     defaultPlatforms,
     azureSasUrls: {
       desktop: desktopAzureSasUrl,
