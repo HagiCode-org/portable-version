@@ -110,6 +110,7 @@ The DLC publication workflow uses its own root-level `index.json` as the only so
 - `dlcs[].dlcName`
 - `dlcs[].versions[]`
 - `dlcs[].versions[].version`
+- `dlcs[].versions[].steamAppId`
 - `dlcs[].versions[].steamDepotIds.linux`
 - `dlcs[].versions[].steamDepotIds.windows`
 - `dlcs[].versions[].steamDepotIds.macos`
@@ -126,6 +127,7 @@ Example:
       "versions": [
         {
           "version": "0.1.0-beta.50",
+          "steamAppId": "4635479",
           "steamDepotIds": {
             "linux": "4635482",
             "windows": "4635480",
@@ -155,6 +157,7 @@ Example:
 Field semantics:
 
 - `dlcName`: stable Steam/DLC identifier. This becomes the per-DLC staging directory name under `steam-dlc-content/<dlcName>/`.
+- `versions[].steamAppId`: version-scoped Steam AppID. The DLC Steam workflow groups builds by this value and emits one `app-build.vdf` per AppID.
 - `versions[].steamDepotIds`: version-scoped Steam depot mapping. The DLC Steam workflow refuses to guess depot ids from repository secrets.
 - `artifacts[]`: download inventory for that DLC version. The workflow derives `windows`, `linux`, and `macos` staging from artifact names/paths.
 
@@ -230,10 +233,10 @@ The DLC Steam publication flow is separate and latest-driven. `portable-version-
 
 1. downloads the dedicated DLC root `index.json`
 2. enumerates every `dlcs[]` entry and resolves the latest version per DLC
-3. validates that each latest version contains complete `steamDepotIds` and required `artifacts[]`
+3. validates that each latest version contains `steamAppId`, complete `steamDepotIds`, and required `artifacts[]`
 4. downloads and extracts the selected DLC archives into `steam-dlc-content/<dlcName>/linux`, `steam-dlc-content/<dlcName>/windows`, and `steam-dlc-content/<dlcName>/macos`
-5. writes `metadata/steam-dlc-release-input.json` with `dlcName`, `dlcVersion`, `steamDepotIds`, `selectedArtifacts`, `preparedPlatforms`, and content roots for every DLC
-6. generates one Steam app build that appends every latest DLC depot definition
+5. writes `metadata/steam-dlc-release-input.json` with `dlcName`, `dlcVersion`, `steamAppId`, `steamDepotIds`, `selectedArtifacts`, `preparedPlatforms`, and content roots for every DLC
+6. groups discovered DLCs by `steamAppId`, generates one `app-build.vdf` per AppID, and publishes those builds sequentially
 7. fails before SteamCMD login whenever any discovered DLC is incomplete
 
 The generated DLC release-input metadata is intentionally explicit so operators can inspect exactly which DLC versions were discovered and which archives were selected for each platform family.
@@ -311,3 +314,4 @@ Each successful build publishes:
 - merged SHA-256 checksums
 - one root-index entry containing `metadata.*`, `steamDepotIds.*`, and `artifacts[]`
 - one toolchain validation report per platform, proving the bundled `node`, `openspec`, and `opsx` commands executed successfully before publication
+For DLC publication, `STEAM_APP_ID` is not used. Each DLC latest version must provide its own `steamAppId` in the DLC root `index.json`.
