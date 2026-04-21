@@ -79,7 +79,6 @@ jobs:
       - name: Publish Steam DLC build
         shell: bash
         env:
-          STEAM_APP_ID: ${{ secrets.STEAM_APP_ID }}
           STEAMCMD_PATH: ${{ env.STEAMCMD_ROOT }}/steamcmd.sh
           STEAM_BRANCH_INPUT: ${{ github.event.inputs.steam_branch }}
           STEAM_DESCRIPTION_INPUT: ${{ github.event.inputs.steam_description }}
@@ -89,7 +88,6 @@ jobs:
             node scripts/publish-steam.mjs
             --release-input "$RUNNER_TEMP/portable-steam-dlc-release/metadata/steam-dlc-release-input.json"
             --output-dir "$RUNNER_TEMP/portable-steam-dlc-build"
-            --app-id "$STEAM_APP_ID"
           )
           if [ "$STEAM_PREVIEW_INPUT" != 'true' ] && [ -n "$STEAM_BRANCH_INPUT" ]; then
             cmd+=(--branch "$STEAM_BRANCH_INPUT")

@@ -197,7 +197,8 @@ async function createArchiveBlob(tempRoot, files, blobPath, entries) {
 async function createDlcHydrationFixture({
   emptyVersionsFor = [],
   omitDepotMapping = null,
-  omitArtifactPlatform = null
+  omitArtifactPlatform = null,
+  omitSteamAppIdFor = null
 } = {}) {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'portable-version-steam-dlc-'));
   const files = new Map();
@@ -222,6 +223,8 @@ async function createDlcHydrationFixture({
     windows: '5735480',
     macos: '5735481'
   };
+  const turboSteamAppId = '14635480';
+  const nitroSteamAppId = '15735480';
 
   if (!(emptyVersionsFor.includes('turbo-engine'))) {
     for (const artifact of turboLatestArtifacts) {
@@ -261,6 +264,7 @@ async function createDlcHydrationFixture({
         : [
             {
               version: '0.1.0-beta.49',
+              steamAppId: turboSteamAppId,
               steamDepotIds: turboLatestDepotIds,
               artifacts: ['linux-x64', 'win-x64', 'osx-universal'].map((platform) =>
                 buildDlcArtifactRecord('turbo-engine', '0.1.0-beta.49', platform)
@@ -268,6 +272,7 @@ async function createDlcHydrationFixture({
             },
             {
               version: turboLatestVersion,
+              ...(omitSteamAppIdFor === 'turbo-engine' ? {} : { steamAppId: turboSteamAppId }),
               steamDepotIds:
                 omitDepotMapping?.dlcName === 'turbo-engine'
                   ? Object.fromEntries(
@@ -290,6 +295,7 @@ async function createDlcHydrationFixture({
         : [
             {
               version: '0.2.0-beta.6',
+              steamAppId: nitroSteamAppId,
               steamDepotIds: nitroLatestDepotIds,
               artifacts: ['linux-x64', 'win-x64', 'osx-universal'].map((platform) =>
                 buildDlcArtifactRecord('nitro-boost', '0.2.0-beta.6', platform)
@@ -297,6 +303,7 @@ async function createDlcHydrationFixture({
             },
             {
               version: nitroLatestVersion,
+              ...(omitSteamAppIdFor === 'nitro-boost' ? {} : { steamAppId: nitroSteamAppId }),
               steamDepotIds:
                 omitDepotMapping?.dlcName === 'nitro-boost'
                   ? Object.fromEntries(
@@ -497,10 +504,10 @@ test('prepare-steam-dlc-release-input hydrates the latest version for every disc
   assert.equal(hydration.discoverySource.includes('index.json'), true);
   assert.equal(hydration.dlcs.length, 2);
   assert.deepEqual(
-    hydration.dlcs.map((entry) => [entry.dlcName, entry.dlcVersion]),
+    hydration.dlcs.map((entry) => [entry.dlcName, entry.dlcVersion, entry.steamAppId]),
     [
-      ['turbo-engine', '0.1.0-beta.50'],
-      ['nitro-boost', '0.2.0-beta.7']
+      ['turbo-engine', '0.1.0-beta.50', '14635480'],
+      ['nitro-boost', '0.2.0-beta.7', '15735480']
     ]
   );
   assert.deepEqual(hydration.dlcs[0].preparedPlatforms, ['linux-x64', 'win-x64', 'osx-universal']);
@@ -515,8 +522,6 @@ test('prepare-steam-dlc-release-input hydrates the latest version for every disc
     path.join(hydrationRoot, 'metadata', 'steam-dlc-release-input.json'),
     '--output-dir',
     steamBuildOutput,
-    '--app-id',
-    '7654321',
     '--branch',
     'candidate',
     '--preview',
@@ -524,22 +529,33 @@ test('prepare-steam-dlc-release-input hydrates the latest version for every disc
   ]);
 
   const manifest = await readJson(path.join(steamBuildOutput, 'steam-build-manifest.json'));
-  const appBuild = await readFile(path.join(steamBuildOutput, 'scripts', 'app-build.vdf'), 'utf8');
+  const turboAppBuild = await readFile(path.join(steamBuildOutput, 'scripts', 'app-build-14635480.vdf'), 'utf8');
+  const nitroAppBuild = await readFile(path.join(steamBuildOutput, 'scripts', 'app-build-15735480.vdf'), 'utf8');
 
   assert.equal(manifest.planPath, null);
   assert.equal(manifest.contentRoot, null);
+  assert.equal(manifest.appId, null);
+  assert.equal(manifest.appBuildPath, null);
   assert.equal(manifest.preview, true);
   assert.equal(manifest.branch, 'candidate');
   assert.equal(manifest.dlcRelease.dlcCount, 2);
+  assert.deepEqual(manifest.dlcRelease.appIds, ['14635480', '15735480']);
   assert.equal(manifest.dlcs.length, 2);
   assert.equal(manifest.depots.length, 6);
+  assert.equal(manifest.appBuilds.length, 2);
+  assert.equal(manifest.appBuilds[0].appId, '14635480');
+  assert.equal(manifest.appBuilds[1].appId, '15735480');
   assert.equal(manifest.depots[0].dlcName, 'turbo-engine');
   assert.equal(manifest.depots[0].platform, 'linux');
+  assert.equal(manifest.depots[0].steamAppId, '14635480');
   assert.equal(manifest.depots[2].sourcePlatform, 'osx-universal');
   assert.equal(manifest.depots[5].dlcName, 'nitro-boost');
+  assert.equal(manifest.depots[5].steamAppId, '15735480');
   assert.equal(manifest.depots[5].sourcePlatform, 'osx-x64+osx-arm64');
-  assert.match(appBuild, /"4635482"/);
-  assert.match(appBuild, /"5735481"/);
+  assert.match(turboAppBuild, /"appid" "14635480"/);
+  assert.match(turboAppBuild, /"4635482"/);
+  assert.match(nitroAppBuild, /"appid" "15735480"/);
+  assert.match(nitroAppBuild, /"5735481"/);
 });
 
 test('prepare-steam-dlc-release-input fails when a discovered DLC does not expose any versions', async () => {
@@ -574,6 +590,22 @@ test('prepare-steam-dlc-release-input fails when the latest DLC version omits a 
         fetchImpl: fixture.fetchImpl
       }),
     /turbo-engine".*steamDepotIds\.macos/
+  );
+});
+
+test('prepare-steam-dlc-release-input fails when the latest DLC version omits steamAppId', async () => {
+  const fixture = await createDlcHydrationFixture({
+    omitSteamAppIdFor: 'turbo-engine'
+  });
+
+  await assert.rejects(
+    () =>
+      prepareSteamDlcReleaseInput({
+        outputDir: path.join(fixture.tempRoot, 'missing-dlc-app-id'),
+        dlcAzureSasUrl: dlcSteamSasUrl,
+        fetchImpl: fixture.fetchImpl
+      }),
+    /versions\[1\]\.steamAppId/
   );
 });
 

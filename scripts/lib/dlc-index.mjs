@@ -29,6 +29,10 @@ function validateSteamDepotIds(steamDepotIds, label) {
   };
 }
 
+function validateSteamAppId(steamAppId, label) {
+  return requireNonEmptyString(steamAppId, label);
+}
+
 function validateArtifactEntry(artifact, label) {
   const normalized = requireObject(artifact, label);
   const name = requireNonEmptyString(normalized.name ?? normalized.fileName, `${label}.name`);
@@ -54,6 +58,7 @@ function validateVersionEntry(versionEntry, label) {
 
   return {
     version: requireNonEmptyString(normalized.version, `${label}.version`),
+    steamAppId: validateSteamAppId(normalized.steamAppId, `${label}.steamAppId`),
     steamDepotIds: requireObject(normalized.steamDepotIds, `${label}.steamDepotIds`),
     artifacts: artifacts.map((artifact, index) => validateArtifactEntry(artifact, `${label}.artifacts[${index}]`))
   };
@@ -162,6 +167,10 @@ export function resolveDlcVersionByReleaseTag({
     updatedAt: normalizedIndex.updatedAt,
     dlcName: matchedDlc.dlcName,
     dlcVersion: matchedVersion.version,
+    steamAppId: validateSteamAppId(
+      matchedVersion.steamAppId,
+      `DLC root index ${sanitizedIndexUrl} version ${matchedVersion.version}.steamAppId`
+    ),
     steamDepotIds: validateSteamDepotIds(
       matchedVersion.steamDepotIds,
       `DLC root index ${sanitizedIndexUrl} version ${matchedVersion.version}.steamDepotIds`
@@ -196,6 +205,10 @@ export function resolveLatestDlcVersions({
     return {
       dlcName: dlcEntry.dlcName,
       dlcVersion: latestVersion.version,
+      steamAppId: validateSteamAppId(
+        latestVersion.steamAppId,
+        `DLC root index ${sanitizedIndexUrl} dlcName "${dlcEntry.dlcName}" version ${latestVersion.version}.steamAppId`
+      ),
       steamDepotIds: validateSteamDepotIds(
         latestVersion.steamDepotIds,
         `DLC root index ${sanitizedIndexUrl} dlcName "${dlcEntry.dlcName}" version ${latestVersion.version}.steamDepotIds`
@@ -225,6 +238,7 @@ export async function resolveDlcReleaseContext({ sasUrl, dlcName, releaseTag, fe
     return {
       dlcName: resolved.dlcName,
       dlcVersion: resolved.dlcVersion,
+      steamAppId: resolved.steamAppId,
       steamDepotIds: resolved.steamDepotIds,
       dlcIndex: {
         sanitizedUrl: sanitizedIndexUrl,

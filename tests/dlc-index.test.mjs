@@ -14,6 +14,7 @@ test('resolveLatestDlcVersions selects the newest version for every DLC in the r
           versions: [
             {
               version: '0.1.0-beta.9',
+              steamAppId: '101',
               steamDepotIds: {
                 linux: '1',
                 windows: '2',
@@ -28,6 +29,7 @@ test('resolveLatestDlcVersions selects the newest version for every DLC in the r
             },
             {
               version: '0.1.0-beta.10',
+              steamAppId: '102',
               steamDepotIds: {
                 linux: '4',
                 windows: '5',
@@ -47,6 +49,7 @@ test('resolveLatestDlcVersions selects the newest version for every DLC in the r
           versions: [
             {
               version: '1.2.0',
+              steamAppId: '201',
               steamDepotIds: {
                 linux: '7',
                 windows: '8',
@@ -61,6 +64,7 @@ test('resolveLatestDlcVersions selects the newest version for every DLC in the r
             },
             {
               version: '1.1.9',
+              steamAppId: '200',
               steamDepotIds: {
                 linux: '10',
                 windows: '11',
@@ -80,10 +84,10 @@ test('resolveLatestDlcVersions selects the newest version for every DLC in the r
   });
 
   assert.deepEqual(
-    resolved.map((entry) => [entry.dlcName, entry.dlcVersion]),
+    resolved.map((entry) => [entry.dlcName, entry.dlcVersion, entry.steamAppId]),
     [
-      ['turbo-engine', '0.1.0-beta.10'],
-      ['nitro-boost', '1.2.0']
+      ['turbo-engine', '0.1.0-beta.10', '102'],
+      ['nitro-boost', '1.2.0', '201']
     ]
   );
 });

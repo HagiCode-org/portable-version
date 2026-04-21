@@ -119,6 +119,7 @@ export async function prepareSteamDlcReleaseInput({
       preparedDlcs.push({
         dlcName: dlc.dlcName,
         dlcVersion: dlc.dlcVersion,
+        steamAppId: dlc.steamAppId,
         contentRoot: dlcContentRoot,
         contentRoots,
         steamDepotIds: dlc.steamDepotIds,
@@ -142,7 +143,7 @@ export async function prepareSteamDlcReleaseInput({
     '## Portable Version Steam DLC release hydration complete',
     `- DLC root index: ${result.discoverySource}`,
     `- DLC count: ${preparedDlcs.length}`,
-    `- DLCs: ${preparedDlcs.map((dlc) => `${dlc.dlcName}@${dlc.dlcVersion}`).join(', ')}`,
+    `- DLCs: ${preparedDlcs.map((dlc) => `${dlc.dlcName}@${dlc.dlcVersion} (app ${dlc.steamAppId})`).join(', ')}`,
     `- Hydration report: ${resultPath}`
   ]);
 
@@ -171,6 +172,7 @@ async function main() {
         dlcs: result.dlcs.map((dlc) => ({
           dlcName: dlc.dlcName,
           dlcVersion: dlc.dlcVersion,
+          steamAppId: dlc.steamAppId,
           contentRoots: dlc.contentRoots,
           steamDepotIds: dlc.steamDepotIds,
           preparedPlatforms: dlc.preparedPlatforms
