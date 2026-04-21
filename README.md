@@ -208,8 +208,7 @@ The automation currently assumes:
 - Server assets follow the framework-dependent naming contract used by HagiCode releases, for example `hagicode-0.1.0-beta.35-linux-x64-nort.zip`.
 - the selected Server asset extracts to a structure that contains `manifest.json`, `config/`, `lib/PCode.Web.dll`, `lib/PCode.Web.runtimeconfig.json`, and `lib/PCode.Web.deps.json`.
 - the downloaded Desktop asset already contains `resources/extra/portable-fixed/` or `Contents/Resources/extra/portable-fixed/`, and the workflow injects the runtime into `current/` inside that directory.
-- the portable toolchain manifest is defined in `config/portable-toolchain.json`, which pins the Node.js distribution per platform and the bundled OpenSpec CLI package version.
-- the repacked archive stages the portable toolchain under `portable-fixed/toolchain/`, including `node/`, `npm-global/`, `bin/openspec`, `bin/opsx`, `env/activate.*`, and `toolchain-manifest.json`.
+- delegated packaging in `steam_packer` pins the portable toolchain per platform and stages it under `portable-fixed/toolchain/`, including `node/`, `npm-global/`, `bin/openspec`, `bin/opsx`, `env/activate.*`, and `toolchain-manifest.json`.
 
 ## Steam publication flow
 
@@ -249,22 +248,15 @@ Run the helper tests from the repository root for `portable-version`:
 npm test
 ```
 
-Use `repos/steam_packer` for delegated packaging verification:
+These tests cover version resolution, Azure index hydration, Steam/DLC preparation, and publication helpers that still live in `portable-version`.
+
+Use `repos/steam_packer` for delegated packaging and Azure publication verification:
 
 ```bash
 cd ../steam_packer
 npm test
 npm run verify:dry-run
 ```
-
-The thin compatibility wrappers in this repository still forward the old packaging script names into `steam_packer`, but new packaging changes should be made in `repos/steam_packer` only.
-
-For manual delegated diagnostics you can still override the network download step with fixture files:
-
-- `scripts/prepare-packaging-workspace.mjs --desktop-asset-source <file-or-url>`
-- `scripts/stage-portable-payload.mjs --service-asset-source <file-or-url>`
-
-Those wrappers are intended for tests and diagnostics only. Production packaging now executes through the delegated `steam_packer` reusable workflow.
 
 ## Migration notes
 
@@ -296,7 +288,7 @@ Use these recovery paths when a workflow run fails or must be replayed:
 2. If the derived Portable Version Azure version directory already exists but the prior upload was partial, re-run with `force_rebuild=true`.
 3. If a specific upstream build must be replayed, provide `service_tag` and optionally `desktop_tag` when you need to pin a non-default Desktop asset.
 4. Inspect the uploaded workflow artifacts:
-   - `portable-release-build-plan`
+   - `steam-packer-build-plan`
    - `portable-release-metadata-<release-tag>`
    - `portable-steam-release-preparation-<release-tag>`
    - `portable-steam-build-metadata-<release-tag>`
