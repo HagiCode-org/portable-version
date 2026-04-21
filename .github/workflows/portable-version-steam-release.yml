@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: 'Portable Version release tag to publish to Steam (for example v0.1.0-beta.35).'
-        required: true
+        description: 'Optional Portable Version release tag to publish to Steam. Leave blank to use the latest Azure-published release.'
+        required: false
         type: string
       steam_preview:
         description: 'Generate a Steam preview build instead of publishing and setting the beta branch live.'
@@ -26,12 +26,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: portable-version-steam-${{ github.event.inputs.release }}
+  group: portable-version-steam-${{ github.event.inputs.release || github.run_id }}
   cancel-in-progress: false
 
 jobs:
   publish_steam:
-    name: Publish Steam build for ${{ inputs.release }}
+    name: Publish Steam build
     runs-on:
       - self-hosted
       - Linux
@@ -58,14 +58,63 @@ jobs:
         env:
           PORTABLE_VERSION_STEAM_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_STEAM_AZURE_SAS_URL }}
         run: |
-          node scripts/prepare-steam-release-input.mjs \
-            --release "${{ github.event.inputs.release }}" \
+          cmd=(
+            node scripts/prepare-steam-release-input.mjs
             --output-dir "$RUNNER_TEMP/portable-steam-release"
+          )
+          if [ -n "${{ github.event.inputs.release }}" ]; then
+            cmd+=(--release "${{ github.event.inputs.release }}")
+          fi
+
+          "${cmd[@]}"
+
+      - name: Resolve effective Steam release metadata
+        id: resolved_release
+        shell: bash
+        run: |
+          metadata_path="$RUNNER_TEMP/portable-steam-release/metadata/steam-release-input.json"
+          node --input-type=module - "$metadata_path" <<'EOF' >> "$GITHUB_OUTPUT"
+          import { readFileSync } from 'node:fs';
+
+          const metadataPath = process.argv[2];
+          const metadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
+          const requested = typeof metadata.requestedReleaseTag === 'string'
+            ? metadata.requestedReleaseTag.trim()
+            : '';
+          const resolved = typeof metadata.resolvedReleaseTag === 'string' && metadata.resolvedReleaseTag.trim()
+            ? metadata.resolvedReleaseTag.trim()
+            : typeof metadata.releaseTag === 'string' && metadata.releaseTag.trim()
+              ? metadata.releaseTag.trim()
+              : '';
+
+          if (!resolved) {
+            throw new Error(`Resolved release tag missing from ${metadataPath}.`);
+          }
+
+          console.log(`requested_release_tag=${requested}`);
+          console.log(`resolved_release_tag=${resolved}`);
+          EOF
+
+      - name: Summarize effective Steam release
+        shell: bash
+        env:
+          REQUESTED_RELEASE_TAG: ${{ steps.resolved_release.outputs.requested_release_tag }}
+          RESOLVED_RELEASE_TAG: ${{ steps.resolved_release.outputs.resolved_release_tag }}
+        run: |
+          {
+            echo "## Portable Version Steam workflow context"
+            if [ -n "$REQUESTED_RELEASE_TAG" ]; then
+              echo "- Requested release tag: $REQUESTED_RELEASE_TAG"
+            else
+              echo "- Requested release tag: [latest]"
+            fi
+            echo "- Resolved release tag: $RESOLVED_RELEASE_TAG"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Steam release preparation metadata
         uses: actions/upload-artifact@v6
         with:
-          name: portable-steam-release-preparation-${{ github.event.inputs.release }}
+          name: portable-steam-release-preparation-${{ steps.resolved_release.outputs.resolved_release_tag }}
           path: ${{ runner.temp }}/portable-steam-release/metadata
           if-no-files-found: error
 
@@ -128,6 +177,6 @@ jobs:
       - name: Upload Steam build metadata
         uses: actions/upload-artifact@v6
         with:
-          name: portable-steam-build-metadata-${{ github.event.inputs.release }}
+          name: portable-steam-build-metadata-${{ steps.resolved_release.outputs.resolved_release_tag }}
           path: ${{ runner.temp }}/portable-steam-build
           if-no-files-found: error
