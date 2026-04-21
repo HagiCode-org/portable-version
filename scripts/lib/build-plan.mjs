@@ -17,6 +17,8 @@ const DEFAULT_REPOSITORIES = {
   portable: 'HagiCode-org/portable-version'
 };
 
+export const PORTABLE_VERSION_HANDOFF_SCHEMA = 'portable-version-steam-packer-handoff/v1';
+
 function normalizeBoolean(value, defaultValue = false) {
   if (value === undefined || value === null || value === '') {
     return defaultValue;
@@ -167,6 +169,22 @@ export async function buildPlan({
       forceRebuild: trigger.forceRebuild,
       dryRun: trigger.dryRun,
       skipReason
+    },
+    handoff: {
+      schema: PORTABLE_VERSION_HANDOFF_SCHEMA,
+      producer: {
+        repository: repositories.portable,
+        workflow: 'portable-version-release'
+      },
+      consumer: {
+        repository: 'HagiCode-org/steam_packer',
+        workflow: 'portable-version-package'
+      },
+      publication: {
+        container: 'hagicode-steam',
+        versionDirectory: `${releaseTag}/`,
+        rootIndexPath: 'index.json'
+      }
     }
   };
 }

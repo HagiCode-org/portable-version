@@ -24,7 +24,7 @@ on:
         default: false
         type: boolean
       dry_run:
-        description: 'Resolve, stage, and package without publishing to the Azure Steam container.'
+        description: 'Resolve and delegate packaging without publishing to the Azure Steam container.'
         required: false
         default: false
         type: boolean
@@ -57,6 +57,7 @@ jobs:
       release_tag: ${{ steps.resolve.outputs.release_tag }}
       platform_matrix: ${{ steps.resolve.outputs.platform_matrix }}
       dry_run: ${{ steps.resolve.outputs.dry_run }}
+      handoff_schema: ${{ steps.resolve.outputs.handoff_schema }}
     steps:
       - name: Checkout portable-version
         uses: actions/checkout@v5
@@ -88,140 +89,18 @@ jobs:
           path: ${{ runner.temp }}/build-plan.json
           if-no-files-found: error
 
-  package:
-    name: Package ${{ matrix.platform }}
+  package_and_publish:
+    name: Delegate packaging and Azure publication
     needs: resolve
     if: needs.resolve.outputs.should_build == 'true'
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.resolve.outputs.platform_matrix) }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Checkout portable-version
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          package-manager-cache: false
-
-      - name: Download Portable Version release plan artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: portable-release-build-plan
-          path: ${{ runner.temp }}/build-plan
-
-      - name: Prepare Desktop archive workspace
-        working-directory: .
-        shell: bash
-        env:
-          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
-        run: |
-          node scripts/prepare-packaging-workspace.mjs \
-            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
-            --platform "${{ matrix.platform }}" \
-            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
-
-      - name: Download and inject service payload
-        working-directory: .
-        shell: bash
-        env:
-          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
-        run: |
-          node scripts/stage-portable-payload.mjs \
-            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
-            --platform "${{ matrix.platform }}" \
-            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
-
-      - name: Stage portable Node and OpenSpec toolchain
-        working-directory: .
-        shell: bash
-        env:
-          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
-        run: |
-          node scripts/stage-portable-toolchain.mjs \
-            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
-            --platform "${{ matrix.platform }}" \
-            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
-
-      - name: Verify portable toolchain
-        working-directory: .
-        shell: bash
-        run: |
-          node scripts/verify-portable-toolchain.mjs \
-            --platform "${{ matrix.platform }}" \
-            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
-
-      - name: Repack portable Desktop archive
-        working-directory: .
-        shell: bash
-        env:
-          GH_TOKEN: ${{ env.PORTABLE_VERSION_GITHUB_TOKEN }}
-        run: |
-          node scripts/package-desktop-portable.mjs \
-            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
-            --platform "${{ matrix.platform }}" \
-            --workspace "$RUNNER_TEMP/portable-version-${{ matrix.platform }}"
-
-      - name: Upload Portable Version package artifacts
-        uses: actions/upload-artifact@v6
-        with:
-          name: portable-release-package-${{ matrix.platform }}
-          path: |
-            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/artifact-inventory-${{ matrix.platform }}.json
-            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/artifact-checksums-${{ matrix.platform }}.txt
-            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/payload-validation-${{ matrix.platform }}.json
-            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/toolchain-validation-${{ matrix.platform }}.json
-            ${{ runner.temp }}/portable-version-${{ matrix.platform }}/release-assets
-          if-no-files-found: error
-
-  publish:
-    name: Publish release
-    needs:
-      - resolve
-      - package
-    if: needs.resolve.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout portable-version
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          package-manager-cache: false
-
-      - name: Download Portable Version release plan artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: portable-release-build-plan
-          path: ${{ runner.temp }}/build-plan
-
-      - name: Download packaged Portable Version artifacts
-        uses: actions/download-artifact@v8
-        with:
-          pattern: portable-release-package-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/publish-input
-
-      - name: Publish Portable Version release or emit dry-run report
-        working-directory: .
-        shell: bash
-        env:
-          STEAM_DEPOT_ID_LINUX: ${{ secrets.STEAM_DEPOT_ID_LINUX }}
-          STEAM_DEPOT_ID_WINDOWS: ${{ secrets.STEAM_DEPOT_ID_WINDOWS }}
-          STEAM_DEPOT_ID_MACOS: ${{ secrets.STEAM_DEPOT_ID_MACOS }}
-        run: |
-          node scripts/publish-release.mjs \
-            --plan "$RUNNER_TEMP/build-plan/build-plan.json" \
-            --artifacts-dir "$RUNNER_TEMP/publish-input" \
-            --output-dir "$RUNNER_TEMP/release-metadata"
-
-      - name: Upload Portable Version release metadata
-        uses: actions/upload-artifact@v6
-        with:
-          name: portable-release-metadata-${{ needs.resolve.outputs.release_tag }}
-          path: ${{ runner.temp }}/release-metadata
-          if-no-files-found: error
+    uses: HagiCode-org/steam_packer/.github/workflows/portable-version-package.yml@main
+    with:
+      build_plan_artifact_name: portable-release-build-plan
+    secrets:
+      portable_version_github_token: ${{ secrets.PORTABLE_VERSION_GITHUB_TOKEN || github.token }}
+      portable_version_desktop_azure_sas_url: ${{ secrets.PORTABLE_VERSION_DESKTOP_AZURE_SAS_URL }}
+      portable_version_service_azure_sas_url: ${{ secrets.PORTABLE_VERSION_SERVICE_AZURE_SAS_URL }}
+      portable_version_steam_azure_sas_url: ${{ secrets.PORTABLE_VERSION_STEAM_AZURE_SAS_URL }}
+      steam_depot_id_linux: ${{ secrets.STEAM_DEPOT_ID_LINUX }}
+      steam_depot_id_windows: ${{ secrets.STEAM_DEPOT_ID_WINDOWS }}
+      steam_depot_id_macos: ${{ secrets.STEAM_DEPOT_ID_MACOS }}

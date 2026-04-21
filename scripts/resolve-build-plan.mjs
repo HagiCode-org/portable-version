@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { parseAzureSasUrl, sanitizeUrlForLogs } from './lib/azure-blob.mjs';
-import { buildPlan } from './lib/build-plan.mjs';
+import { buildPlan, PORTABLE_VERSION_HANDOFF_SCHEMA } from './lib/build-plan.mjs';
 import { ensureDir, readJson, writeJson } from './lib/fs-utils.mjs';
 import { DEFAULT_INDEX_SOURCES } from './lib/index-source.mjs';
 import { DEFAULT_PLATFORMS } from './lib/platforms.mjs';
@@ -88,6 +88,8 @@ async function main() {
 
   await writeGithubOutputs({
     plan_path: outputPath,
+    build_plan_artifact_name: 'portable-release-build-plan',
+    handoff_schema: PORTABLE_VERSION_HANDOFF_SCHEMA,
     release_tag: plan.release.tag,
     release_identity: 'web-only',
     should_build: plan.build.shouldBuild,
@@ -110,6 +112,8 @@ async function main() {
     `- Steam Azure SAS: ${steamAzureSasUrl ? sanitizeUrlForLogs(steamAzureSasUrl) : '[not-configured]'}`,
     `- Release exists in Azure index: ${plan.release.exists ? 'yes' : 'no'}`,
     `- Build mode: ${plan.build.dryRun ? 'dry-run' : 'publish'}`,
+    `- Delegated execution: ${plan.handoff.consumer.repository} / ${plan.handoff.consumer.workflow}`,
+    `- Handoff schema: ${plan.handoff.schema}`,
     plan.build.shouldBuild ? '- Packaging will continue.' : `- Packaging skipped: ${plan.build.skipReason}`
   ]);
 

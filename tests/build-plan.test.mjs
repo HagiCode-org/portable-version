@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPlan, normalizeTriggerInputs } from '../scripts/lib/build-plan.mjs';
+import { buildPlan, normalizeTriggerInputs, PORTABLE_VERSION_HANDOFF_SCHEMA } from '../scripts/lib/build-plan.mjs';
 import { derivePortableReleaseTag, normalizeReleaseTagComponent } from '../scripts/lib/platforms.mjs';
 
 const defaultPlatforms = ['linux-x64'];
@@ -166,6 +166,9 @@ test('buildPlan resolves latest index versions and platform assets', async () =>
   assert.equal(plan.release.name, 'Portable Version v0.1.0-beta.35');
   assert.equal(plan.release.notesTitle, 'Portable Version v0.1.0-beta.35');
   assert.equal(plan.build.shouldBuild, true);
+  assert.equal(plan.handoff.schema, PORTABLE_VERSION_HANDOFF_SCHEMA);
+  assert.equal(plan.handoff.consumer.repository, 'HagiCode-org/steam_packer');
+  assert.equal(plan.handoff.publication.versionDirectory, 'v0.1.0-beta.35/');
 });
 
 test('buildPlan normalizes explicit selectors and reuses existing release state', async () => {
