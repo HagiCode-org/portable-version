@@ -1,0 +1,126 @@
+name: portable-version-steam-dlc-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      steam_preview:
+        description: 'Generate a Steam preview build instead of publishing and setting the beta branch live.'
+        required: false
+        default: false
+        type: boolean
+      steam_branch:
+        description: 'Steam branch to set live for non-preview uploads.'
+        required: false
+        default: 'beta'
+        type: string
+      steam_description:
+        description: 'Optional Steam build description override.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-version-steam-dlc-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish_steam_dlc:
+    name: Publish latest Steam DLC depots
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - steam
+    env:
+      STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+      STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+      STEAM_SHARED_SECRET: ${{ secrets.STEAM_SHARED_SECRET }}
+      STEAM_GUARD_CODE: ${{ secrets.STEAM_GUARD_CODE }}
+    steps:
+      - name: Checkout portable-version
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Prepare Steam DLC release hydration input
+        shell: bash
+        env:
+          PORTABLE_VERSION_DLC_AZURE_SAS_URL: ${{ secrets.PORTABLE_VERSION_DLC_AZURE_SAS_URL }}
+        run: |
+          node scripts/prepare-steam-dlc-release-input.mjs \
+            --output-dir "$RUNNER_TEMP/portable-steam-dlc-release"
+
+      - name: Upload Steam DLC release preparation metadata
+        uses: actions/upload-artifact@v6
+        with:
+          name: portable-steam-dlc-release-preparation
+          path: ${{ runner.temp }}/portable-steam-dlc-release/metadata
+          if-no-files-found: error
+
+      - name: Install SteamCMD
+        shell: bash
+        env:
+          STEAMCMD_ROOT_INPUT: ${{ vars.PORTABLE_VERSION_STEAMCMD_ROOT }}
+        run: |
+          steamcmd_root="${STEAMCMD_ROOT_INPUT:-$HOME/.local/share/portable-version/steamcmd}"
+          mkdir -p "$steamcmd_root"
+          if [ ! -x "$steamcmd_root/steamcmd.sh" ]; then
+            curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C "$steamcmd_root"
+          fi
+          mkdir -p "$steamcmd_root/config"
+          echo "STEAMCMD_ROOT=$steamcmd_root" >> "$GITHUB_ENV"
+
+      - name: Publish Steam DLC build
+        shell: bash
+        env:
+          STEAM_APP_ID: ${{ secrets.STEAM_APP_ID }}
+          STEAMCMD_PATH: ${{ env.STEAMCMD_ROOT }}/steamcmd.sh
+          STEAM_BRANCH_INPUT: ${{ github.event.inputs.steam_branch }}
+          STEAM_DESCRIPTION_INPUT: ${{ github.event.inputs.steam_description }}
+          STEAM_PREVIEW_INPUT: ${{ github.event.inputs.steam_preview }}
+        run: |
+          cmd=(
+            node scripts/publish-steam.mjs
+            --release-input "$RUNNER_TEMP/portable-steam-dlc-release/metadata/steam-dlc-release-input.json"
+            --output-dir "$RUNNER_TEMP/portable-steam-dlc-build"
+            --app-id "$STEAM_APP_ID"
+          )
+          if [ "$STEAM_PREVIEW_INPUT" != 'true' ] && [ -n "$STEAM_BRANCH_INPUT" ]; then
+            cmd+=(--branch "$STEAM_BRANCH_INPUT")
+          fi
+          if [ -n "$STEAM_DESCRIPTION_INPUT" ]; then
+            cmd+=(--description "$STEAM_DESCRIPTION_INPUT")
+          fi
+          if [ "$STEAM_PREVIEW_INPUT" = 'true' ]; then
+            cmd+=(--preview)
+          fi
+
+          "${cmd[@]}"
+
+      - name: Summarize SteamCMD persistence
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## SteamCMD persistence"
+            echo "- Root: ${STEAMCMD_ROOT}"
+            echo "- Config: ${STEAMCMD_ROOT}/config/config.vdf"
+            if [ -f "${STEAMCMD_ROOT}/config/config.vdf" ]; then
+              echo "- Saved login token: present"
+            else
+              echo "- Saved login token: missing"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Steam DLC build metadata
+        uses: actions/upload-artifact@v6
+        with:
+          name: portable-steam-dlc-build-metadata
+          path: ${{ runner.temp }}/portable-steam-dlc-build
+          if-no-files-found: error

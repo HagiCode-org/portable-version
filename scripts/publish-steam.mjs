@@ -36,6 +36,18 @@ function buildDefaultDescription(plan, depots, branch) {
   ].join(' | ');
 }
 
+function buildDefaultDlcDescription(releaseInput, depots, branch) {
+  const branchLabel = branch ? ` branch ${branch}` : ' default branch';
+  const dlcLabel = releaseInput.dlcs.map((dlc) => `${dlc.dlcName}@${dlc.dlcVersion}`).join(', ');
+  return [
+    `Portable Version DLC publication`,
+    `DLC count ${releaseInput.dlcs.length}`,
+    `DLCs ${dlcLabel}`,
+    `Depots ${depots.map((depot) => `${depot.dlcName}:${depot.platform}`).join(', ')}`,
+    `Target${branchLabel}`
+  ].join(' | ');
+}
+
 function decodeSharedSecret(sharedSecret) {
   return Buffer.from(sharedSecret, 'base64');
 }
@@ -182,7 +194,24 @@ async function loadReleaseInput(releaseInputPath) {
   const resolvedPath = path.resolve(releaseInputPath);
   const releaseInput = await readJson(resolvedPath);
 
+  if (Array.isArray(releaseInput?.dlcs)) {
+    if (releaseInput.dlcs.length === 0) {
+      throw new Error(`release-input ${resolvedPath} does not contain any DLC entries.`);
+    }
+
+    return {
+      mode: 'dlc',
+      sourcePath: resolvedPath,
+      discoverySource: releaseInput.discoverySource
+        ? requireNonEmptyString(releaseInput.discoverySource, `release-input ${resolvedPath}.discoverySource`)
+        : '[missing-dlc-discovery-source]',
+      dlcIndex: releaseInput.dlcIndex ?? null,
+      dlcs: releaseInput.dlcs.map((entry, index) => normalizeDlcReleaseEntry(entry, resolvedPath, index))
+    };
+  }
+
   return {
+    mode: 'base',
     sourcePath: resolvedPath,
     releaseTag: requireNonEmptyString(releaseInput?.releaseTag, 'release-input.releaseTag'),
     planPath: path.resolve(requireNonEmptyString(releaseInput?.buildManifestPath, 'release-input.buildManifestPath')),
@@ -195,7 +224,69 @@ async function loadReleaseInput(releaseInputPath) {
   };
 }
 
-async function resolveDepotDefinitions(steamDepotIds, contentRoot) {
+function normalizeStringArray(value, label) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${label} must be a non-empty array.`);
+  }
+
+  return value.map((entry, index) => requireNonEmptyString(entry, `${label}[${index}]`));
+}
+
+function normalizeDlcSelectedArtifacts(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized = {};
+  for (const platform of PLATFORM_OPTIONS) {
+    const records = value[platform.metadataKey];
+    if (!records) {
+      continue;
+    }
+
+    if (!Array.isArray(records) || records.length === 0) {
+      throw new Error(`${label}.${platform.metadataKey} must be a non-empty array when provided.`);
+    }
+
+    normalized[platform.metadataKey] = records.map((record, index) => ({
+      platform: requireNonEmptyString(record?.platform, `${label}.${platform.metadataKey}[${index}].platform`),
+      name: requireNonEmptyString(
+        record?.name ?? record?.fileName,
+        `${label}.${platform.metadataKey}[${index}].name`
+      ),
+      path: requireNonEmptyString(record?.path, `${label}.${platform.metadataKey}[${index}].path`)
+    }));
+  }
+
+  return normalized;
+}
+
+function normalizeDlcReleaseEntry(entry, resolvedPath, index) {
+  const label = `release-input ${resolvedPath}.dlcs[${index}]`;
+  const contentRoots = entry?.contentRoots;
+  if (!contentRoots || typeof contentRoots !== 'object' || Array.isArray(contentRoots)) {
+    throw new Error(`${label}.contentRoots must be an object.`);
+  }
+
+  return {
+    dlcName: requireNonEmptyString(entry?.dlcName, `${label}.dlcName`),
+    dlcVersion: requireNonEmptyString(entry?.dlcVersion, `${label}.dlcVersion`),
+    contentRoot: path.resolve(requireNonEmptyString(entry?.contentRoot, `${label}.contentRoot`)),
+    contentRoots: {
+      linux: path.resolve(requireNonEmptyString(contentRoots.linux, `${label}.contentRoots.linux`)),
+      windows: path.resolve(requireNonEmptyString(contentRoots.windows, `${label}.contentRoots.windows`)),
+      macos: path.resolve(requireNonEmptyString(contentRoots.macos, `${label}.contentRoots.macos`))
+    },
+    steamDepotIds: normalizeSteamDepotIds(entry?.steamDepotIds, {
+      sourceLabel: label,
+      requireAllPlatforms: true
+    }),
+    preparedPlatforms: normalizeStringArray(entry?.preparedPlatforms, `${label}.preparedPlatforms`),
+    selectedArtifacts: normalizeDlcSelectedArtifacts(entry?.selectedArtifacts, `${label}.selectedArtifacts`)
+  };
+}
+
+async function resolveBaseDepotDefinitions(steamDepotIds, contentRoot) {
   const depotDefinitions = [];
 
   for (const platform of PLATFORM_OPTIONS) {
@@ -250,6 +341,50 @@ async function resolveDepotDefinitions(steamDepotIds, contentRoot) {
   return depotDefinitions;
 }
 
+function deriveDlcSourcePlatform(dlcEntry, metadataKey) {
+  const selectedArtifacts = dlcEntry.selectedArtifacts?.[metadataKey];
+  if (Array.isArray(selectedArtifacts) && selectedArtifacts.length > 0) {
+    return selectedArtifacts.map((artifact) => artifact.platform).join('+');
+  }
+
+  return metadataKey;
+}
+
+async function resolveDlcDepotDefinitions(dlcEntries) {
+  const depotDefinitions = [];
+
+  for (const dlcEntry of dlcEntries) {
+    for (const platform of PLATFORM_OPTIONS) {
+      const depotId = dlcEntry.steamDepotIds[platform.metadataKey];
+      const contentRoot = dlcEntry.contentRoots[platform.metadataKey];
+
+      if (!depotId) {
+        throw new Error(
+          `DLC ${dlcEntry.dlcName} version ${dlcEntry.dlcVersion} is missing steamDepotIds.${platform.metadataKey}; Steam publication cannot continue.`
+        );
+      }
+
+      if (!(await pathExists(contentRoot))) {
+        throw new Error(
+          `DLC ${dlcEntry.dlcName} version ${dlcEntry.dlcVersion} is missing prepared ${platform.metadataKey} content under ${contentRoot}.`
+        );
+      }
+
+      depotDefinitions.push({
+        depotId,
+        platform: platform.metadataKey,
+        sourcePlatform: deriveDlcSourcePlatform(dlcEntry, platform.metadataKey),
+        contentRoot,
+        fileName: `depot-build-${dlcEntry.dlcName}-${platform.metadataKey}.vdf`,
+        dlcName: dlcEntry.dlcName,
+        dlcVersion: dlcEntry.dlcVersion
+      });
+    }
+  }
+
+  return depotDefinitions;
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -277,29 +412,39 @@ async function main() {
   const releaseInput = values['release-input']
     ? await loadReleaseInput(values['release-input'])
     : null;
-  const planPath = releaseInput?.planPath ?? values.plan;
-  const contentRootValue = releaseInput?.contentRoot ?? values['content-root'];
+  const planPath =
+    releaseInput?.mode === 'base' ? releaseInput.planPath : releaseInput ? null : values.plan;
+  const contentRootValue =
+    releaseInput?.mode === 'base' ? releaseInput.contentRoot : releaseInput ? null : values['content-root'];
 
-  if (!planPath || !contentRootValue) {
+  if (!releaseInput && (!planPath || !contentRootValue)) {
     throw new Error('publish-steam requires either --release-input or both --plan and --content-root.');
   }
 
-  const plan = await readJson(path.resolve(planPath));
-  const contentRoot = path.resolve(contentRootValue);
-  const outputDir = path.resolve(values['output-dir'] ?? path.join(contentRoot, '..', 'steam-build'));
+  const plan = planPath ? await readJson(path.resolve(planPath)) : null;
+  const contentRoot = contentRootValue ? path.resolve(contentRootValue) : null;
+  const defaultOutputRoot = contentRoot ?? releaseInput?.dlcs?.[0]?.contentRoot ?? process.cwd();
+  const outputDir = path.resolve(values['output-dir'] ?? path.join(defaultOutputRoot, '..', 'steam-build'));
   const buildOutputDir = path.join(outputDir, 'build-output');
   const scriptsDir = path.join(outputDir, 'scripts');
   const preview = values.preview;
   const dryRun = values['force-dry-run'];
 
-  if (!(await pathExists(contentRoot))) {
+  if (contentRoot && !(await pathExists(contentRoot))) {
     throw new Error(`Steam content root does not exist at ${contentRoot}.`);
   }
 
-  const steamDepotIds = releaseInput?.steamDepotIds ?? resolveCliSteamDepotIds(values);
-  const depotDefinitions = await resolveDepotDefinitions(steamDepotIds, contentRoot);
+  const steamDepotIds =
+    releaseInput?.mode === 'base' ? releaseInput.steamDepotIds : releaseInput ? null : resolveCliSteamDepotIds(values);
+  const depotDefinitions =
+    releaseInput?.mode === 'dlc'
+      ? await resolveDlcDepotDefinitions(releaseInput.dlcs)
+      : await resolveBaseDepotDefinitions(steamDepotIds, contentRoot);
   const description =
-    values.description?.trim() || buildDefaultDescription(plan, depotDefinitions, values.branch);
+    values.description?.trim() ||
+    (releaseInput?.mode === 'dlc'
+      ? buildDefaultDlcDescription(releaseInput, depotDefinitions, values.branch)
+      : buildDefaultDescription(plan, depotDefinitions, values.branch));
 
   await ensureDir(buildOutputDir);
   await ensureDir(scriptsDir);
@@ -325,8 +470,8 @@ async function main() {
 
   const manifestPath = path.join(outputDir, 'steam-build-manifest.json');
   await writeJson(manifestPath, {
-    releaseTag: plan.release.tag,
-    planPath: path.resolve(planPath),
+    releaseTag: plan?.release?.tag ?? null,
+    planPath: planPath ? path.resolve(planPath) : null,
     releaseInputPath: releaseInput?.sourcePath ?? null,
     appId: values['app-id'],
     description,
@@ -340,13 +485,36 @@ async function main() {
           steamDepotIds
         }
       : null,
-    depots: depotDefinitions.map(({ depotId, platform, sourcePlatform, contentRoot: root, vdfPath }) => ({
-      depotId,
-      platform,
-      sourcePlatform,
-      contentRoot: root,
-      vdfPath
-    })),
+    dlcRelease:
+      releaseInput?.mode === 'dlc'
+        ? {
+            discoverySource: releaseInput.discoverySource,
+            dlcCount: releaseInput.dlcs.length
+          }
+        : null,
+    dlcs:
+      releaseInput?.mode === 'dlc'
+        ? releaseInput.dlcs.map((dlc) => ({
+            dlcName: dlc.dlcName,
+            dlcVersion: dlc.dlcVersion,
+            contentRoot: dlc.contentRoot,
+            contentRoots: dlc.contentRoots,
+            preparedPlatforms: dlc.preparedPlatforms,
+            steamDepotIds: dlc.steamDepotIds,
+            selectedArtifacts: dlc.selectedArtifacts
+          }))
+        : [],
+    depots: depotDefinitions.map(
+      ({ depotId, platform, sourcePlatform, contentRoot: root, vdfPath, dlcName = null, dlcVersion = null }) => ({
+        depotId,
+        platform,
+        sourcePlatform,
+        contentRoot: root,
+        vdfPath,
+        dlcName,
+        dlcVersion
+      })
+    ),
     contentRoot,
     appBuildPath
   });
@@ -354,18 +522,26 @@ async function main() {
   if (dryRun) {
     await appendSummary([
       '## Portable Version Steam publication dry-run',
-      `- Release tag: ${plan.release.tag}`,
+      ...(plan ? [`- Release tag: ${plan.release.tag}`] : []),
       `- App ID: ${values['app-id']}`,
       `- Preview mode: ${preview ? 'enabled' : 'disabled'}`,
       ...(releaseInput
         ? [
-            `- Azure release tag: ${releaseInput.releaseTag}`,
-            `- Azure root index: ${releaseInput.azureIndex?.sanitizedUrl ?? '[missing-azure-index-context]'}`
+            ...(releaseInput.mode === 'base'
+              ? [
+                  `- Azure release tag: ${releaseInput.releaseTag}`,
+                  `- Azure root index: ${releaseInput.azureIndex?.sanitizedUrl ?? '[missing-azure-index-context]'}`
+                ]
+              : [
+                  `- DLC discovery source: ${releaseInput.discoverySource}`,
+                  `- DLC count: ${releaseInput.dlcs.length}`,
+                  `- DLCs: ${releaseInput.dlcs.map((dlc) => `${dlc.dlcName}@${dlc.dlcVersion}`).join(', ')}`
+                ])
           ]
         : []),
       `- Depot count: ${depotDefinitions.length}`,
       `- Depot platforms: ${depotDefinitions.map((depot) => depot.platform).join(', ')}`,
-      `- Content root: ${contentRoot}`,
+      ...(contentRoot ? [`- Content root: ${contentRoot}`] : []),
       `- App build script: ${appBuildPath}`
     ]);
     console.log(JSON.stringify({ manifestPath, appBuildPath, depotCount: depotDefinitions.length }, null, 2));
@@ -418,20 +594,28 @@ async function main() {
 
   await appendSummary([
     '## Portable Version Steam publication complete',
-    `- Release tag: ${plan.release.tag}`,
+    ...(plan ? [`- Release tag: ${plan.release.tag}`] : []),
     `- App ID: ${values['app-id']}`,
     `- Preview mode: ${preview ? 'enabled' : 'disabled'}`,
     ...(releaseInput
       ? [
-          `- Azure release tag: ${releaseInput.releaseTag}`,
-          `- Azure root index: ${releaseInput.azureIndex?.sanitizedUrl ?? '[missing-azure-index-context]'}`
+          ...(releaseInput.mode === 'base'
+            ? [
+                `- Azure release tag: ${releaseInput.releaseTag}`,
+                `- Azure root index: ${releaseInput.azureIndex?.sanitizedUrl ?? '[missing-azure-index-context]'}`
+              ]
+            : [
+                `- DLC discovery source: ${releaseInput.discoverySource}`,
+                `- DLC count: ${releaseInput.dlcs.length}`,
+                `- DLCs: ${releaseInput.dlcs.map((dlc) => `${dlc.dlcName}@${dlc.dlcVersion}`).join(', ')}`
+              ])
         ]
       : []),
     `- Depot count: ${depotDefinitions.length}`,
     `- Depot platforms: ${depotDefinitions.map((depot) => depot.platform).join(', ')}`,
     `- Steam login mode: ${hasSavedSteamLogin ? 'reused saved SteamCMD token' : 'bootstrapped and saved new SteamCMD token'}`,
     `- SteamCMD config: ${steamcmdConfigPath}`,
-    `- Content root: ${contentRoot}`,
+    ...(contentRoot ? [`- Content root: ${contentRoot}`] : []),
     `- App build script: ${appBuildPath}`
   ]);
 

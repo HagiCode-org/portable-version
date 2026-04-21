@@ -7,12 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { createArchive } from '../scripts/lib/archive.mjs';
 import { runCommand } from '../scripts/lib/command.mjs';
 import { readJson, writeJson } from '../scripts/lib/fs-utils.mjs';
+import { prepareSteamDlcReleaseInput } from '../scripts/prepare-steam-dlc-release-input.mjs';
 import { prepareSteamReleaseInput } from '../scripts/prepare-steam-release-input.mjs';
 import { buildSteamLoginArgs, generateSteamGuardCode, getSteamcmdConfigPath } from '../scripts/publish-steam.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const defaultReleaseTag = 'v0.1.0-beta.33';
 const steamSasUrl = 'https://example.blob.core.windows.net/hagicode-steam?sp=rl&sig=test-token';
+const dlcSteamSasUrl = 'https://example.blob.core.windows.net/hagicode-steam-dlc?sp=rl&sig=test-token';
 
 function createPortableRootIndex({
   releaseTag = defaultReleaseTag,
@@ -157,6 +159,165 @@ async function createHydrationFixture({
         steamDepotIds,
         artifacts
       }),
+      files
+    })
+  };
+}
+
+function createDlcRootIndex(dlcs) {
+  return {
+    updatedAt: '2026-04-21T03:09:32.3804912Z',
+    dlcs
+  };
+}
+
+function buildDlcArtifactRecord(dlcName, version, platform) {
+  const fileName = `hagicode-dlc-${dlcName}-${version}-${platform}-nort.zip`;
+  return {
+    name: fileName,
+    path: `${dlcName}/${version}/${fileName}`
+  };
+}
+
+async function createArchiveBlob(tempRoot, files, blobPath, entries) {
+  const sourceRoot = path.join(tempRoot, 'dlc-sources', blobPath.replace(/[^A-Za-z0-9._/-]+/g, '-'));
+  const archivePath = path.join(tempRoot, 'dlc-archives', path.basename(blobPath));
+
+  await mkdir(sourceRoot, { recursive: true });
+  for (const [entryPath, content] of Object.entries(entries)) {
+    const targetPath = path.join(sourceRoot, entryPath);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, content, 'utf8');
+  }
+
+  await createArchive(sourceRoot, archivePath);
+  files.set(blobPath, await readFile(archivePath));
+}
+
+async function createDlcHydrationFixture({
+  emptyVersionsFor = [],
+  omitDepotMapping = null,
+  omitArtifactPlatform = null
+} = {}) {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'portable-version-steam-dlc-'));
+  const files = new Map();
+
+  const turboLatestVersion = '0.1.0-beta.50';
+  const nitroLatestVersion = '0.2.0-beta.7';
+
+  const turboLatestArtifacts = ['linux-x64', 'win-x64', 'osx-universal'].map((platform) =>
+    buildDlcArtifactRecord('turbo-engine', turboLatestVersion, platform)
+  );
+  const nitroLatestArtifacts = ['linux-x64', 'win-x64', 'osx-x64', 'osx-arm64'].map((platform) =>
+    buildDlcArtifactRecord('nitro-boost', nitroLatestVersion, platform)
+  );
+
+  const turboLatestDepotIds = {
+    linux: '4635482',
+    windows: '4635480',
+    macos: '4635481'
+  };
+  const nitroLatestDepotIds = {
+    linux: '5735482',
+    windows: '5735480',
+    macos: '5735481'
+  };
+
+  if (!(emptyVersionsFor.includes('turbo-engine'))) {
+    for (const artifact of turboLatestArtifacts) {
+      if (omitArtifactPlatform?.dlcName === 'turbo-engine' && omitArtifactPlatform.platform === artifact.name.match(/-(linux-x64|win-x64|osx-universal)-nort\.zip$/)?.[1]) {
+        continue;
+      }
+      await createArchiveBlob(tempRoot, files, artifact.path, {
+        'README.txt': `turbo-engine ${artifact.name}`,
+        ...(artifact.name.includes('linux-x64') ? { 'bin/turbo-linux.txt': 'turbo linux latest' } : {}),
+        ...(artifact.name.includes('win-x64') ? { 'bin/turbo-windows.txt': 'turbo windows latest' } : {}),
+        ...(artifact.name.includes('osx-universal') ? { 'mac/turbo-universal.txt': 'turbo mac universal latest' } : {})
+      });
+    }
+  }
+
+  if (!(emptyVersionsFor.includes('nitro-boost'))) {
+    for (const artifact of nitroLatestArtifacts) {
+      const platform = artifact.name.match(/-(linux-x64|win-x64|osx-x64|osx-arm64)-nort\.zip$/)?.[1];
+      if (omitArtifactPlatform?.dlcName === 'nitro-boost' && omitArtifactPlatform.platform === platform) {
+        continue;
+      }
+      await createArchiveBlob(tempRoot, files, artifact.path, {
+        'README.txt': `nitro-boost ${artifact.name}`,
+        ...(platform === 'linux-x64' ? { 'linux/nitro-linux.txt': 'nitro linux latest' } : {}),
+        ...(platform === 'win-x64' ? { 'windows/nitro-windows.txt': 'nitro windows latest' } : {}),
+        ...(platform === 'osx-x64' ? { 'macos/x64-only.txt': 'nitro mac x64 latest' } : {}),
+        ...(platform === 'osx-arm64' ? { 'macos/arm64-only.txt': 'nitro mac arm64 latest' } : {})
+      });
+    }
+  }
+
+  const dlcs = [
+    {
+      dlcName: 'turbo-engine',
+      versions: emptyVersionsFor.includes('turbo-engine')
+        ? []
+        : [
+            {
+              version: '0.1.0-beta.49',
+              steamDepotIds: turboLatestDepotIds,
+              artifacts: ['linux-x64', 'win-x64', 'osx-universal'].map((platform) =>
+                buildDlcArtifactRecord('turbo-engine', '0.1.0-beta.49', platform)
+              )
+            },
+            {
+              version: turboLatestVersion,
+              steamDepotIds:
+                omitDepotMapping?.dlcName === 'turbo-engine'
+                  ? Object.fromEntries(
+                      Object.entries(turboLatestDepotIds).filter(([platform]) => platform !== omitDepotMapping.platform)
+                    )
+                  : turboLatestDepotIds,
+              artifacts: turboLatestArtifacts.filter((artifact) => {
+                const platform = artifact.name.match(/-(linux-x64|win-x64|osx-universal)-nort\.zip$/)?.[1];
+                return !(
+                  omitArtifactPlatform?.dlcName === 'turbo-engine' && omitArtifactPlatform.platform === platform
+                );
+              })
+            }
+          ]
+    },
+    {
+      dlcName: 'nitro-boost',
+      versions: emptyVersionsFor.includes('nitro-boost')
+        ? []
+        : [
+            {
+              version: '0.2.0-beta.6',
+              steamDepotIds: nitroLatestDepotIds,
+              artifacts: ['linux-x64', 'win-x64', 'osx-universal'].map((platform) =>
+                buildDlcArtifactRecord('nitro-boost', '0.2.0-beta.6', platform)
+              )
+            },
+            {
+              version: nitroLatestVersion,
+              steamDepotIds:
+                omitDepotMapping?.dlcName === 'nitro-boost'
+                  ? Object.fromEntries(
+                      Object.entries(nitroLatestDepotIds).filter(([platform]) => platform !== omitDepotMapping.platform)
+                    )
+                  : nitroLatestDepotIds,
+              artifacts: nitroLatestArtifacts.filter((artifact) => {
+                const platform = artifact.name.match(/-(linux-x64|win-x64|osx-x64|osx-arm64)-nort\.zip$/)?.[1];
+                return !(
+                  omitArtifactPlatform?.dlcName === 'nitro-boost' && omitArtifactPlatform.platform === platform
+                );
+              })
+            }
+          ]
+    }
+  ];
+
+  return {
+    tempRoot,
+    fetchImpl: createAzureFetchFixture({
+      index: createDlcRootIndex(dlcs),
       files
     })
   };
@@ -320,6 +481,137 @@ test('prepare-steam-release-input fails when a required archive is missing from 
       }),
     /Failed to download/
   );
+});
+
+test('prepare-steam-dlc-release-input hydrates the latest version for every discovered DLC and publishes all depots', async () => {
+  const fixture = await createDlcHydrationFixture();
+  const hydrationRoot = path.join(fixture.tempRoot, 'hydrated-dlc-release');
+  const steamBuildOutput = path.join(fixture.tempRoot, 'steam-dlc-build');
+
+  const hydration = await prepareSteamDlcReleaseInput({
+    outputDir: hydrationRoot,
+    dlcAzureSasUrl: dlcSteamSasUrl,
+    fetchImpl: fixture.fetchImpl
+  });
+
+  assert.equal(hydration.discoverySource.includes('index.json'), true);
+  assert.equal(hydration.dlcs.length, 2);
+  assert.deepEqual(
+    hydration.dlcs.map((entry) => [entry.dlcName, entry.dlcVersion]),
+    [
+      ['turbo-engine', '0.1.0-beta.50'],
+      ['nitro-boost', '0.2.0-beta.7']
+    ]
+  );
+  assert.deepEqual(hydration.dlcs[0].preparedPlatforms, ['linux-x64', 'win-x64', 'osx-universal']);
+  assert.deepEqual(hydration.dlcs[1].preparedPlatforms, ['linux-x64', 'win-x64', 'osx-x64', 'osx-arm64']);
+  assert.equal(await readFile(path.join(hydration.dlcs[0].contentRoots.linux, 'bin', 'turbo-linux.txt'), 'utf8'), 'turbo linux latest');
+  assert.equal(await readFile(path.join(hydration.dlcs[1].contentRoots.macos, 'macos', 'x64-only.txt'), 'utf8'), 'nitro mac x64 latest');
+  assert.equal(await readFile(path.join(hydration.dlcs[1].contentRoots.macos, 'macos', 'arm64-only.txt'), 'utf8'), 'nitro mac arm64 latest');
+
+  await runCommand('node', [
+    path.join(repoRoot, 'scripts', 'publish-steam.mjs'),
+    '--release-input',
+    path.join(hydrationRoot, 'metadata', 'steam-dlc-release-input.json'),
+    '--output-dir',
+    steamBuildOutput,
+    '--app-id',
+    '7654321',
+    '--branch',
+    'candidate',
+    '--preview',
+    '--force-dry-run'
+  ]);
+
+  const manifest = await readJson(path.join(steamBuildOutput, 'steam-build-manifest.json'));
+  const appBuild = await readFile(path.join(steamBuildOutput, 'scripts', 'app-build.vdf'), 'utf8');
+
+  assert.equal(manifest.planPath, null);
+  assert.equal(manifest.contentRoot, null);
+  assert.equal(manifest.preview, true);
+  assert.equal(manifest.branch, 'candidate');
+  assert.equal(manifest.dlcRelease.dlcCount, 2);
+  assert.equal(manifest.dlcs.length, 2);
+  assert.equal(manifest.depots.length, 6);
+  assert.equal(manifest.depots[0].dlcName, 'turbo-engine');
+  assert.equal(manifest.depots[0].platform, 'linux');
+  assert.equal(manifest.depots[2].sourcePlatform, 'osx-universal');
+  assert.equal(manifest.depots[5].dlcName, 'nitro-boost');
+  assert.equal(manifest.depots[5].sourcePlatform, 'osx-x64+osx-arm64');
+  assert.match(appBuild, /"4635482"/);
+  assert.match(appBuild, /"5735481"/);
+});
+
+test('prepare-steam-dlc-release-input fails when a discovered DLC does not expose any versions', async () => {
+  const fixture = await createDlcHydrationFixture({
+    emptyVersionsFor: ['nitro-boost']
+  });
+
+  await assert.rejects(
+    () =>
+      prepareSteamDlcReleaseInput({
+        outputDir: path.join(fixture.tempRoot, 'missing-latest-version'),
+        dlcAzureSasUrl: dlcSteamSasUrl,
+        fetchImpl: fixture.fetchImpl
+      }),
+    /nitro-boost".*does not contain any versions/
+  );
+});
+
+test('prepare-steam-dlc-release-input fails when the latest DLC version omits a depot mapping', async () => {
+  const fixture = await createDlcHydrationFixture({
+    omitDepotMapping: {
+      dlcName: 'turbo-engine',
+      platform: 'macos'
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      prepareSteamDlcReleaseInput({
+        outputDir: path.join(fixture.tempRoot, 'missing-dlc-depot'),
+        dlcAzureSasUrl: dlcSteamSasUrl,
+        fetchImpl: fixture.fetchImpl
+      }),
+    /turbo-engine".*steamDepotIds\.macos/
+  );
+});
+
+test('prepare-steam-dlc-release-input fails when the latest DLC version omits a required artifact', async () => {
+  const fixture = await createDlcHydrationFixture({
+    omitArtifactPlatform: {
+      dlcName: 'turbo-engine',
+      platform: 'win-x64'
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      prepareSteamDlcReleaseInput({
+        outputDir: path.join(fixture.tempRoot, 'missing-dlc-artifact'),
+        dlcAzureSasUrl: dlcSteamSasUrl,
+        fetchImpl: fixture.fetchImpl
+      }),
+    /Failed to prepare DLC turbo-engine version 0.1.0-beta.50: .*win-x64 artifact/
+  );
+});
+
+test('prepare-steam-dlc-release-input preserves macOS fallback staging for a split DLC archive set', async () => {
+  const fixture = await createDlcHydrationFixture();
+  const hydration = await prepareSteamDlcReleaseInput({
+    outputDir: path.join(fixture.tempRoot, 'macos-fallback'),
+    dlcAzureSasUrl: dlcSteamSasUrl,
+    fetchImpl: fixture.fetchImpl
+  });
+  const nitroBoost = hydration.dlcs.find((entry) => entry.dlcName === 'nitro-boost');
+
+  assert.ok(nitroBoost);
+  assert.deepEqual(
+    nitroBoost.selectedArtifacts.macos.map((artifact) => artifact.platform),
+    ['osx-x64', 'osx-arm64']
+  );
+  assert.equal(await readFile(path.join(nitroBoost.contentRoots.macos, 'macos', 'x64-only.txt'), 'utf8'), 'nitro mac x64 latest');
+  assert.equal(await readFile(path.join(nitroBoost.contentRoots.macos, 'macos', 'arm64-only.txt'), 'utf8'), 'nitro mac arm64 latest');
 });
 
 test('publish-steam uses one unified macOS depot backed by universal content', async () => {

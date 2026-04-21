@@ -21,6 +21,7 @@ const WINDOWS_TOOLCHAIN = {
 export const UNIVERSAL_MACOS_PLATFORM = 'osx-universal';
 export const UNIVERSAL_MACOS_MEMBER_PLATFORMS = ['osx-x64', 'osx-arm64'];
 export const DEFAULT_BUILD_PLATFORMS = ['linux-x64', 'win-x64', UNIVERSAL_MACOS_PLATFORM];
+export const STEAM_PUBLICATION_PLATFORM_FAMILIES = ['linux', 'windows', 'macos'];
 
 const PLATFORM_MAP = {
   'linux-x64': {
@@ -227,4 +228,132 @@ export function toSafeFileComponent(value) {
 
 export function buildDeterministicAssetName(_releaseTag, platformId, _sourceName) {
   return `hagicode-portable-${platformId}.zip`;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function requireNonEmptyString(value, label) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) {
+    throw new Error(`${label} must be a non-empty string.`);
+  }
+  return normalized;
+}
+
+function detectArtifactPlatformFromString(value) {
+  const haystack = String(value ?? '').toLowerCase();
+  const candidates = [
+    UNIVERSAL_MACOS_PLATFORM,
+    'linux-x64',
+    'win-x64',
+    'osx-arm64',
+    'osx-x64'
+  ];
+
+  for (const candidate of candidates) {
+    const pattern = new RegExp(`(^|[^a-z0-9])${escapeRegExp(candidate)}([^a-z0-9]|$)`, 'i');
+    if (pattern.test(haystack)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+export function detectArtifactPlatform(artifact) {
+  const explicitPlatform = String(artifact?.platform ?? '').trim().toLowerCase();
+  if (explicitPlatform && PLATFORM_MAP[explicitPlatform]) {
+    return explicitPlatform;
+  }
+
+  return (
+    detectArtifactPlatformFromString(artifact?.name) ??
+    detectArtifactPlatformFromString(artifact?.fileName) ??
+    detectArtifactPlatformFromString(artifact?.path)
+  );
+}
+
+function normalizeSteamArtifactRecord(artifact, label) {
+  if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) {
+    throw new Error(`${label} must be an object.`);
+  }
+
+  const name = requireNonEmptyString(artifact.name ?? artifact.fileName, `${label}.name`);
+  const fileName = requireNonEmptyString(artifact.fileName ?? name, `${label}.fileName`);
+  const artifactPath = requireNonEmptyString(artifact.path ?? fileName, `${label}.path`);
+  const platform = detectArtifactPlatform(artifact);
+  if (!platform) {
+    throw new Error(
+      `${label} does not expose a recognizable platform. Expected one of linux-x64, win-x64, osx-universal, osx-x64, osx-arm64.`
+    );
+  }
+
+  return {
+    ...artifact,
+    platform,
+    name,
+    fileName,
+    path: artifactPath
+  };
+}
+
+function requireUniqueArtifact(platformMap, platformId, sourceLabel) {
+  const artifact = platformMap.get(platformId);
+  if (!artifact) {
+    return null;
+  }
+  return artifact;
+}
+
+export function selectSteamArtifactsForPublication(artifacts, { sourceLabel = 'Steam publication artifacts' } = {}) {
+  if (!Array.isArray(artifacts) || artifacts.length === 0) {
+    throw new Error(`${sourceLabel} must contain at least one artifact.`);
+  }
+
+  const artifactsByPlatform = new Map();
+  for (const [index, artifact] of artifacts.entries()) {
+    const normalizedArtifact = normalizeSteamArtifactRecord(artifact, `${sourceLabel}[${index}]`);
+    if (artifactsByPlatform.has(normalizedArtifact.platform)) {
+      throw new Error(
+        `${sourceLabel} contains multiple artifacts for ${normalizedArtifact.platform}; Steam publication expects exactly one artifact per concrete platform.`
+      );
+    }
+    artifactsByPlatform.set(normalizedArtifact.platform, normalizedArtifact);
+  }
+
+  const linuxArtifact = requireUniqueArtifact(artifactsByPlatform, 'linux-x64', sourceLabel);
+  if (!linuxArtifact) {
+    throw new Error(`${sourceLabel} is missing the required linux-x64 artifact.`);
+  }
+
+  const windowsArtifact = requireUniqueArtifact(artifactsByPlatform, 'win-x64', sourceLabel);
+  if (!windowsArtifact) {
+    throw new Error(`${sourceLabel} is missing the required win-x64 artifact.`);
+  }
+
+  let macosArtifacts = [];
+  const macosUniversalArtifact = requireUniqueArtifact(artifactsByPlatform, UNIVERSAL_MACOS_PLATFORM, sourceLabel);
+  if (macosUniversalArtifact) {
+    macosArtifacts = [macosUniversalArtifact];
+  } else {
+    const macosX64Artifact = requireUniqueArtifact(artifactsByPlatform, 'osx-x64', sourceLabel);
+    const macosArm64Artifact = requireUniqueArtifact(artifactsByPlatform, 'osx-arm64', sourceLabel);
+    if (!macosX64Artifact || !macosArm64Artifact) {
+      throw new Error(
+        `${sourceLabel} is missing the required macOS artifact set; expected osx-universal or both osx-x64 and osx-arm64.`
+      );
+    }
+    macosArtifacts = [macosX64Artifact, macosArm64Artifact];
+  }
+
+  return {
+    selectedArtifacts: {
+      linux: [linuxArtifact],
+      windows: [windowsArtifact],
+      macos: macosArtifacts
+    },
+    preparedPlatforms: [linuxArtifact.platform, windowsArtifact.platform, ...macosArtifacts.map((artifact) => artifact.platform)]
+  };
 }

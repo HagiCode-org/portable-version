@@ -1,4 +1,5 @@
 import { buildSignedBlobUrl, sanitizeUrlForLogs } from './azure-blob.mjs';
+import { compareNormalizedVersions } from './index-source.mjs';
 
 function fail(message) {
   throw new Error(message);
@@ -28,6 +29,21 @@ function validateSteamDepotIds(steamDepotIds, label) {
   };
 }
 
+function validateArtifactEntry(artifact, label) {
+  const normalized = requireObject(artifact, label);
+  const name = requireNonEmptyString(normalized.name ?? normalized.fileName, `${label}.name`);
+  const fileName = normalized.fileName ? requireNonEmptyString(normalized.fileName, `${label}.fileName`) : name;
+  const artifactPath = requireNonEmptyString(normalized.path ?? fileName, `${label}.path`);
+
+  return {
+    ...normalized,
+    name,
+    fileName,
+    path: artifactPath,
+    platform: normalized.platform ? requireNonEmptyString(normalized.platform, `${label}.platform`) : null
+  };
+}
+
 function validateVersionEntry(versionEntry, label) {
   const normalized = requireObject(versionEntry, label);
   const artifacts = normalized.artifacts;
@@ -38,8 +54,8 @@ function validateVersionEntry(versionEntry, label) {
 
   return {
     version: requireNonEmptyString(normalized.version, `${label}.version`),
-    steamDepotIds: validateSteamDepotIds(normalized.steamDepotIds, `${label}.steamDepotIds`),
-    artifacts
+    steamDepotIds: requireObject(normalized.steamDepotIds, `${label}.steamDepotIds`),
+    artifacts: artifacts.map((artifact, index) => validateArtifactEntry(artifact, `${label}.artifacts[${index}]`))
   };
 }
 
@@ -73,9 +89,20 @@ export function validateDlcRootIndexDocument(document, { sanitizedIndexUrl = '[u
     fail(`DLC root index ${sanitizedIndexUrl} is missing a dlcs array.`);
   }
 
+  const normalizedDlcs = dlcs.map((dlcEntry, index) =>
+    validateDlcEntry(dlcEntry, `DLC root index ${sanitizedIndexUrl}.dlcs[${index}]`)
+  );
+  const seenDlcNames = new Set();
+  for (const dlcEntry of normalizedDlcs) {
+    if (seenDlcNames.has(dlcEntry.dlcName)) {
+      fail(`DLC root index ${sanitizedIndexUrl} contains duplicate dlcName "${dlcEntry.dlcName}".`);
+    }
+    seenDlcNames.add(dlcEntry.dlcName);
+  }
+
   return {
     updatedAt: requireNonEmptyString(normalized.updatedAt, `DLC root index ${sanitizedIndexUrl}.updatedAt`),
-    dlcs: dlcs.map((dlcEntry, index) => validateDlcEntry(dlcEntry, `DLC root index ${sanitizedIndexUrl}.dlcs[${index}]`))
+    dlcs: normalizedDlcs
   };
 }
 
@@ -142,6 +169,43 @@ export function resolveDlcVersionByReleaseTag({
   };
 }
 
+function resolveLatestVersionEntry(versions, label) {
+  if (!Array.isArray(versions) || versions.length === 0) {
+    fail(`${label} does not contain any versions.`);
+  }
+
+  return [...versions].sort((left, right) => compareNormalizedVersions(right.version, left.version))[0];
+}
+
+export function resolveLatestDlcVersions({
+  dlcIndex,
+  sanitizedIndexUrl = '[unknown-dlc-index]'
+} = {}) {
+  const normalizedIndex = validateDlcRootIndexDocument(dlcIndex, { sanitizedIndexUrl });
+
+  if (normalizedIndex.dlcs.length === 0) {
+    fail(`DLC root index ${sanitizedIndexUrl} does not contain any DLC entries.`);
+  }
+
+  return normalizedIndex.dlcs.map((dlcEntry) => {
+    const latestVersion = resolveLatestVersionEntry(
+      dlcEntry.versions,
+      `DLC root index ${sanitizedIndexUrl} dlcName "${dlcEntry.dlcName}"`
+    );
+
+    return {
+      dlcName: dlcEntry.dlcName,
+      dlcVersion: latestVersion.version,
+      steamDepotIds: validateSteamDepotIds(
+        latestVersion.steamDepotIds,
+        `DLC root index ${sanitizedIndexUrl} dlcName "${dlcEntry.dlcName}" version ${latestVersion.version}.steamDepotIds`
+      ),
+      artifacts: latestVersion.artifacts,
+      availableVersions: dlcEntry.versions.map((entry) => entry.version)
+    };
+  });
+}
+
 export async function resolveDlcReleaseContext({ sasUrl, dlcName, releaseTag, fetchImpl = fetch } = {}) {
   const normalizedDlcName = requireNonEmptyString(dlcName, 'Configured DLC name');
   const normalizedReleaseTag = requireNonEmptyString(releaseTag, 'Requested release tag');
@@ -172,5 +236,29 @@ export async function resolveDlcReleaseContext({ sasUrl, dlcName, releaseTag, fe
     fail(
       `DLC index resolution failed for dlc "${normalizedDlcName}" and release "${normalizedReleaseTag}": ${error.message}`
     );
+  }
+}
+
+export async function resolveLatestDlcReleaseContext({ sasUrl, fetchImpl = fetch } = {}) {
+  try {
+    const { document, sanitizedIndexUrl } = await fetchDlcRootIndex({
+      sasUrl,
+      fetchImpl
+    });
+    const resolvedDlcs = resolveLatestDlcVersions({
+      dlcIndex: document,
+      sanitizedIndexUrl
+    });
+
+    return {
+      dlcs: resolvedDlcs,
+      dlcIndex: {
+        sanitizedUrl: sanitizedIndexUrl,
+        updatedAt: document.updatedAt,
+        dlcCount: document.dlcs.length
+      }
+    };
+  } catch (error) {
+    fail(`DLC index latest-version resolution failed: ${error.message}`);
   }
 }
