@@ -167,6 +167,25 @@ Optional repository variables:
 
 - `PORTABLE_VERSION_STEAMCMD_ROOT`: absolute path on the self-hosted runner where SteamCMD and its persistent `config/config.vdf` should be stored. Defaults to `$HOME/.local/share/portable-version/steamcmd`.
 
+## SteamCMD persistence contract
+
+`PORTABLE_VERSION_STEAMCMD_ROOT` is the single durable root for SteamCMD authentication state in both Steam workflows. The workflows install `steamcmd.sh` into that directory and expect any reusable authentication files to live under the same root, including:
+
+- `config/config.vdf`
+- `config/loginusers.vdf` when SteamCMD writes account metadata
+- root-level `ssfn*` files when Steam Guard persistence is available
+
+The publication script now probes that root as a set instead of hard-coding only `config/config.vdf`. Successful runs write the probe result, initial/final authentication mode, fallback usage, and any failure stage into `steam-build-manifest.json`, and the workflow summary prefers that manifest output before falling back to a direct root probe.
+
+Directory relocation is supported as long as the entire SteamCMD root moves together. If a self-hosted runner is replaced or the storage mount changes, copy the full `PORTABLE_VERSION_STEAMCMD_ROOT` directory, then update `STEAMCMD_PATH` or the repository variable to point to the new absolute location. The script resolves the root from the current `steamcmd.sh` path, so it does not depend on the old absolute path.
+
+If Steam authentication starts prompting unexpectedly, check these items first:
+
+- The workflow summary or uploaded `steam-build-manifest.json` for `steamAuthentication.detectedStatePaths`, `detectionReason`, `initialMode`, `finalMode`, and `failureStage`.
+- Whether `PORTABLE_VERSION_STEAMCMD_ROOT` still points at the intended persistent directory on the self-hosted runner.
+- Whether the root still contains `config/config.vdf` or `ssfn*` after any runner cleanup, home-directory reset, or storage migration.
+- Whether `STEAM_PASSWORD` is still configured, because the script only performs one credentialed refresh attempt when saved-login reuse fails.
+
 Workflow permissions are set to:
 
 - `portable-version-steam-release`: `contents: read`
@@ -196,9 +215,10 @@ Steam publication hydrates its input from an existing Azure-hosted Portable Vers
 5. installs `steamcmd` on the dedicated self-hosted runner
 6. generates app and depot VDF scripts under `steam-build/scripts/`
 7. saves the initial SteamCMD login token under the persistent SteamCMD root and reuses that token on future runs
-8. derives a Steam Guard code from `STEAM_SHARED_SECRET` when available, otherwise uses `STEAM_GUARD_CODE` if provided
-9. writes `metadata/steam-release-input.json` with both the requested selector and the resolved effective release
-10. runs `steamcmd +run_app_build` in preview or publish mode
+8. probes the configured SteamCMD root, records which authentication files were detected, and prefers saved-login reuse before any password-based bootstrap
+9. derives a Steam Guard code from `STEAM_SHARED_SECRET` when available, otherwise uses `STEAM_GUARD_CODE` if provided
+10. writes `metadata/steam-release-input.json` with both the requested selector and the resolved effective release
+11. runs `steamcmd +run_app_build` in preview or publish mode, retrying once with a credentialed refresh if saved-login reuse fails and `STEAM_PASSWORD` is available
 
 `steam_preview=false` uploads the build while setting `beta` live unless you override `steam_branch`. `steam_preview=true` keeps the Steam upload in preview mode so you can validate depot mappings and authentication without pushing a live update; preview runs do not pass `setlive` even if `steam_branch` is populated.
 
