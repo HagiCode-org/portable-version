@@ -6,6 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { runCommand } from './lib/command.mjs';
 import { ensureDir, pathExists, readJson, writeJson } from './lib/fs-utils.mjs';
+import {
+  buildSteamAuthSummaryLines,
+  formatDetectedStatePaths,
+  getSteamcmdConfigPath,
+  resolveSteamcmdAuthState
+} from './lib/steam-auth.mjs';
 import { annotateError, appendSummary } from './lib/summary.mjs';
 
 const STEAM_GUARD_ALPHABET = '23456789BCDFGHJKMNPQRTVWXY';
@@ -125,14 +131,6 @@ function buildAppVdf({ appId, description, buildOutput, depotDefinitions, previe
   lines.push('  }');
   lines.push('}');
   return lines.join('\n');
-}
-
-function getSteamcmdRoot(steamcmdPath) {
-  return path.dirname(path.resolve(steamcmdPath));
-}
-
-function getSteamcmdConfigPath(steamcmdPath) {
-  return path.join(getSteamcmdRoot(steamcmdPath), 'config', 'config.vdf');
 }
 
 function buildSteamLoginArgs({ steamUsername, steamPassword, steamGuardCode, useSavedLogin }) {
@@ -456,6 +454,62 @@ function buildAppBuildDefinitions({
   ];
 }
 
+function createInitialSteamAuthentication() {
+  return {
+    steamcmdRoot: null,
+    canonicalConfigPath: null,
+    detectedStatePaths: [],
+    hasReusableLogin: false,
+    detectionReason: null,
+    initialMode: null,
+    finalMode: null,
+    fallbackTriggered: false,
+    failureStage: null
+  };
+}
+
+function buildSteamAuthContext(diagnostics) {
+  return [
+    `SteamCMD root: ${diagnostics?.steamcmdRoot ?? '[unknown]'}.`,
+    `Detection reason: ${diagnostics?.detectionReason ?? '[unknown]'}.`,
+    `State files: ${formatDetectedStatePaths(diagnostics?.detectedStatePaths)}.`
+  ].join(' ');
+}
+
+async function updateSteamAuthentication(manifestPath, manifest, updates) {
+  manifest.steamAuthentication = {
+    ...(manifest.steamAuthentication ?? createInitialSteamAuthentication()),
+    ...updates
+  };
+  await writeJson(manifestPath, manifest);
+  return manifest.steamAuthentication;
+}
+
+async function runCredentialedSteamBootstrap({ steamcmdPath, steamUsername, steamPassword, steamGuardCode }) {
+  await runCommand(steamcmdPath, [
+    ...buildSteamLoginArgs({
+      steamUsername,
+      steamPassword,
+      steamGuardCode,
+      useSavedLogin: false
+    }),
+    '+info',
+    '+quit'
+  ]);
+}
+
+async function runSteamAppBuildWithSavedLogin({ steamcmdPath, steamUsername, appBuildPath }) {
+  await runCommand(steamcmdPath, [
+    ...buildSteamLoginArgs({
+      steamUsername,
+      useSavedLogin: true
+    }),
+    '+run_app_build',
+    appBuildPath,
+    '+quit'
+  ]);
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -550,7 +604,7 @@ async function main() {
   }
 
   const manifestPath = path.join(outputDir, 'steam-build-manifest.json');
-  await writeJson(manifestPath, {
+  const manifest = {
     releaseTag: plan?.release?.tag ?? null,
     planPath: planPath ? path.resolve(planPath) : null,
     releaseInputPath: releaseInput?.sourcePath ?? null,
@@ -618,8 +672,10 @@ async function main() {
       appBuildPath: build.appBuildPath,
       depotCount: build.depotDefinitions.length,
       depotIds: build.depotDefinitions.map((depot) => depot.depotId)
-    }))
-  });
+    })),
+    steamAuthentication: createInitialSteamAuthentication()
+  };
+  await writeJson(manifestPath, manifest);
 
   if (dryRun) {
     await appendSummary([
@@ -664,48 +720,132 @@ async function main() {
 
   const steamcmdPath = values['steamcmd-path'] ?? process.env.STEAMCMD_PATH;
   if (!steamcmdPath) {
+    await updateSteamAuthentication(manifestPath, manifest, {
+      failureStage: 'configuration'
+    });
     throw new Error('Steam publication requires --steamcmd-path or STEAMCMD_PATH.');
   }
 
-  const steamcmdConfigPath = getSteamcmdConfigPath(steamcmdPath);
-  const hasSavedSteamLogin = await pathExists(steamcmdConfigPath);
+  const steamAuthState = await resolveSteamcmdAuthState(steamcmdPath);
+  const initialMode = steamAuthState.hasReusableLogin ? 'saved-login' : 'credentialed-bootstrap';
+  await updateSteamAuthentication(manifestPath, manifest, {
+    ...steamAuthState,
+    initialMode,
+    finalMode: initialMode,
+    fallbackTriggered: false,
+    failureStage: null
+  });
+
   const steamUsername = process.env.STEAM_USERNAME;
   const steamPassword = process.env.STEAM_PASSWORD;
   if (!steamUsername) {
+    await updateSteamAuthentication(manifestPath, manifest, {
+      failureStage: 'credentials'
+    });
     throw new Error('Steam publication requires STEAM_USERNAME.');
   }
-  if (!hasSavedSteamLogin && !steamPassword) {
-    throw new Error('Steam publication requires STEAM_PASSWORD when no saved SteamCMD login token exists.');
+  if (!steamAuthState.hasReusableLogin && !steamPassword) {
+    await updateSteamAuthentication(manifestPath, manifest, {
+      failureStage: 'credentialed-bootstrap'
+    });
+    throw new Error(
+      `Steam publication requires STEAM_PASSWORD because no reusable SteamCMD login state was detected. ${buildSteamAuthContext(manifest.steamAuthentication)}`
+    );
   }
 
   const steamGuardCode = process.env.STEAM_GUARD_CODE ||
     (process.env.STEAM_SHARED_SECRET ? generateSteamGuardCode(process.env.STEAM_SHARED_SECRET) : '');
 
-  if (!hasSavedSteamLogin) {
-    await runCommand(steamcmdPath, [
-      ...buildSteamLoginArgs({
+  if (!steamAuthState.hasReusableLogin) {
+    try {
+      await runCredentialedSteamBootstrap({
+        steamcmdPath,
         steamUsername,
         steamPassword,
-        steamGuardCode,
-        useSavedLogin: false
-      }),
-      '+info',
-      '+quit'
-    ]);
+        steamGuardCode
+      });
+    } catch (error) {
+      await updateSteamAuthentication(manifestPath, manifest, {
+        failureStage: 'credentialed-bootstrap'
+      });
+      throw new Error(
+        `Steam credentialed bootstrap login failed. ${buildSteamAuthContext(manifest.steamAuthentication)} ${error.message}`
+      );
+    }
   }
 
   for (const appBuild of appBuildDefinitions) {
-    await runCommand(steamcmdPath, [
-      ...buildSteamLoginArgs({
+    try {
+      await runSteamAppBuildWithSavedLogin({
+        steamcmdPath,
         steamUsername,
-        steamPassword,
-        steamGuardCode,
-        useSavedLogin: true
-      }),
-      '+run_app_build',
-      appBuild.appBuildPath,
-      '+quit'
-    ]);
+        appBuildPath: appBuild.appBuildPath
+      });
+    } catch (error) {
+      const shouldAttemptFallback =
+        manifest.steamAuthentication.initialMode === 'saved-login' &&
+        manifest.steamAuthentication.fallbackTriggered !== true;
+
+      if (!shouldAttemptFallback) {
+        await updateSteamAuthentication(manifestPath, manifest, {
+          failureStage: 'run-app-build'
+        });
+        throw new Error(
+          `Steam app build failed for app ${appBuild.appId}. ${buildSteamAuthContext(manifest.steamAuthentication)} ${error.message}`
+        );
+      }
+
+      if (!steamPassword) {
+        await updateSteamAuthentication(manifestPath, manifest, {
+          failureStage: 'saved-login'
+        });
+        throw new Error(
+          `Saved SteamCMD login reuse failed for app ${appBuild.appId}, and STEAM_PASSWORD is unavailable for a refresh. ${buildSteamAuthContext(manifest.steamAuthentication)} ${error.message}`
+        );
+      }
+
+      await updateSteamAuthentication(manifestPath, manifest, {
+        fallbackTriggered: true,
+        finalMode: 'credentialed-fallback',
+        failureStage: null
+      });
+
+      try {
+        await runCredentialedSteamBootstrap({
+          steamcmdPath,
+          steamUsername,
+          steamPassword,
+          steamGuardCode
+        });
+      } catch (fallbackError) {
+        await updateSteamAuthentication(manifestPath, manifest, {
+          failureStage: 'credentialed-fallback'
+        });
+        throw new Error(
+          `Saved SteamCMD login reuse failed for app ${appBuild.appId}, and the credentialed refresh attempt also failed. ${buildSteamAuthContext(manifest.steamAuthentication)} ${fallbackError.message}`
+        );
+      }
+
+      await updateSteamAuthentication(manifestPath, manifest, {
+        finalMode: 'refreshed-saved-login',
+        failureStage: null
+      });
+
+      try {
+        await runSteamAppBuildWithSavedLogin({
+          steamcmdPath,
+          steamUsername,
+          appBuildPath: appBuild.appBuildPath
+        });
+      } catch (retryError) {
+        await updateSteamAuthentication(manifestPath, manifest, {
+          failureStage: 'run-app-build'
+        });
+        throw new Error(
+          `Steam app build failed for app ${appBuild.appId} after refreshing the saved SteamCMD login. ${buildSteamAuthContext(manifest.steamAuthentication)} ${retryError.message}`
+        );
+      }
+    }
   }
 
   await appendSummary([
@@ -730,8 +870,7 @@ async function main() {
       : []),
     `- Depot count: ${depotDefinitions.length}`,
     `- Depot platforms: ${depotDefinitions.map((depot) => depot.platform).join(', ')}`,
-    `- Steam login mode: ${hasSavedSteamLogin ? 'reused saved SteamCMD token' : 'bootstrapped and saved new SteamCMD token'}`,
-    `- SteamCMD config: ${steamcmdConfigPath}`,
+    ...buildSteamAuthSummaryLines(manifest.steamAuthentication),
     ...(contentRoot ? [`- Content root: ${contentRoot}`] : []),
     `- App build scripts: ${appBuildDefinitions.map((build) => build.appBuildPath).join(', ')}`
   ]);
@@ -742,7 +881,8 @@ async function main() {
         manifestPath,
         appBuildCount: appBuildDefinitions.length,
         appBuildPaths: appBuildDefinitions.map((build) => build.appBuildPath),
-        depotCount: depotDefinitions.length
+        depotCount: depotDefinitions.length,
+        steamAuthentication: manifest.steamAuthentication
       },
       null,
       2
@@ -770,5 +910,6 @@ export {
   buildDefaultDescription,
   buildSteamLoginArgs,
   generateSteamGuardCode,
-  getSteamcmdConfigPath
+  getSteamcmdConfigPath,
+  resolveSteamcmdAuthState
 };
