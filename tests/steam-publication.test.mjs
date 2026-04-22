@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createArchive } from '../scripts/lib/archive.mjs';
 import { runCommand } from '../scripts/lib/command.mjs';
 import { readJson, writeJson } from '../scripts/lib/fs-utils.mjs';
+import { resolveSteamcmdAuthState } from '../scripts/lib/steam-auth.mjs';
 import { prepareSteamDlcReleaseInput } from '../scripts/prepare-steam-dlc-release-input.mjs';
 import { prepareSteamReleaseInput } from '../scripts/prepare-steam-release-input.mjs';
 import { buildSteamLoginArgs, generateSteamGuardCode, getSteamcmdConfigPath } from '../scripts/publish-steam.mjs';
@@ -20,6 +21,161 @@ const defaultSteamDepotIds = {
   windows: '7654323',
   macos: '7654324'
 };
+
+async function createLocalSteamPublicationFixture({ tempRoot, releaseTag = defaultReleaseTag } = {}) {
+  const root = tempRoot ?? (await mkdtemp(path.join(os.tmpdir(), 'portable-version-steam-local-')));
+  const planPath = path.join(root, 'build-plan.json');
+  const contentRoot = path.join(root, 'steam-content');
+  const outputDir = path.join(root, 'steam-build');
+
+  await mkdir(path.join(contentRoot, 'linux-x64'), { recursive: true });
+  await mkdir(path.join(contentRoot, 'win-x64'), { recursive: true });
+  await writeFile(path.join(contentRoot, 'linux-x64', 'hagicode'), 'linux build', 'utf8');
+  await writeFile(path.join(contentRoot, 'win-x64', 'hagicode.exe'), 'windows build', 'utf8');
+
+  await writeJson(planPath, {
+    upstream: {
+      desktop: { version: 'v0.2.0' },
+      service: { version: releaseTag.replace(/^v/, '') }
+    },
+    release: {
+      tag: releaseTag
+    }
+  });
+
+  return {
+    tempRoot: root,
+    planPath,
+    contentRoot,
+    outputDir
+  };
+}
+
+async function createFakeSteamcmdRoot(tempRoot, { createSavedState = false } = {}) {
+  const steamcmdRoot = path.join(tempRoot, 'steamcmd-root');
+  const statePath = path.join(tempRoot, 'fake-steamcmd-state.json');
+  const logPath = path.join(tempRoot, 'fake-steamcmd-log.jsonl');
+  const steamcmdPath = path.join(steamcmdRoot, 'steamcmd.sh');
+  const steamcmdRunnerPath = path.join(steamcmdRoot, 'steamcmd-runner.mjs');
+
+  await mkdir(path.join(steamcmdRoot, 'config'), { recursive: true });
+  await writeFile(
+    steamcmdRunnerPath,
+    `#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+
+const steamcmdPath = path.join(path.dirname(process.argv[1]), 'steamcmd.sh');
+const args = process.argv.slice(2);
+const steamcmdRoot = path.dirname(steamcmdPath);
+const logPath = process.env.FAKE_STEAM_LOG_PATH;
+const statePath = process.env.FAKE_STEAM_STATE_PATH;
+
+const defaultState = {
+  savedLoginFailuresRemaining: Number.parseInt(process.env.FAKE_STEAM_FAIL_SAVED_LOGIN_COUNT ?? '0', 10) || 0
+};
+
+function loadState() {
+  if (!statePath || !fs.existsSync(statePath)) {
+    return { ...defaultState };
+  }
+  return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+}
+
+function saveState(state) {
+  if (!statePath) {
+    return;
+  }
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+}
+
+function appendLog(entry) {
+  if (!logPath) {
+    return;
+  }
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  fs.appendFileSync(logPath, \`\${JSON.stringify(entry)}\\n\`, 'utf8');
+}
+
+const state = loadState();
+const hasCredentialedLogin =
+  args[0] === '+login' && typeof args[2] === 'string' && !args[2].startsWith('+');
+const hasSavedLogin = args[0] === '+login' && !hasCredentialedLogin;
+const isBootstrap = args.includes('+info');
+const buildIndex = args.indexOf('+run_app_build');
+const appBuildPath = buildIndex >= 0 ? args[buildIndex + 1] : null;
+
+appendLog({
+  args,
+  hasCredentialedLogin,
+  hasSavedLogin,
+  isBootstrap,
+  appBuildPath
+});
+
+if (hasSavedLogin && appBuildPath && state.savedLoginFailuresRemaining > 0) {
+  state.savedLoginFailuresRemaining -= 1;
+  saveState(state);
+  console.error('saved login rejected');
+  process.exit(1);
+}
+
+if (hasCredentialedLogin && process.env.FAKE_STEAM_FAIL_CREDENTIALED_LOGIN === '1') {
+  console.error('credentialed login rejected');
+  process.exit(1);
+}
+
+if (hasCredentialedLogin) {
+  fs.mkdirSync(path.join(steamcmdRoot, 'config'), { recursive: true });
+  fs.writeFileSync(path.join(steamcmdRoot, 'config', 'config.vdf'), '"config"', 'utf8');
+  fs.writeFileSync(path.join(steamcmdRoot, 'config', 'loginusers.vdf'), '"users"', 'utf8');
+  fs.writeFileSync(path.join(steamcmdRoot, 'ssfn123456'), 'guard', 'utf8');
+  saveState(state);
+}
+
+if (process.env.FAKE_STEAM_FAIL_RUN_APP_BUILD === '1' && appBuildPath) {
+  console.error('run_app_build failed');
+  process.exit(1);
+}
+
+process.exit(0);
+`,
+    'utf8'
+  );
+  await writeFile(
+    steamcmdPath,
+    `#!/usr/bin/env bash
+set -euo pipefail
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+exec node "$script_dir/steamcmd-runner.mjs" "$@"
+`,
+    'utf8'
+  );
+  await chmod(steamcmdPath, 0o755);
+
+  if (createSavedState) {
+    await writeFile(path.join(steamcmdRoot, 'config', 'config.vdf'), '"config"', 'utf8');
+    await writeFile(path.join(steamcmdRoot, 'config', 'loginusers.vdf'), '"users"', 'utf8');
+    await writeFile(path.join(steamcmdRoot, 'ssfn123456'), 'guard', 'utf8');
+  }
+
+  return {
+    steamcmdRoot,
+    steamcmdPath,
+    statePath,
+    logPath
+  };
+}
+
+async function readFakeSteamLog(logPath) {
+  const content = await readFile(logPath, 'utf8');
+  return content
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
 
 function createPortableReleaseArtifacts(releaseTag) {
   return [
@@ -869,6 +1025,207 @@ test('publish-steam uses one unified macOS depot backed by universal content', a
   assert.equal(manifest.depots[0].platform, 'macos');
   assert.equal(manifest.depots[0].sourcePlatform, 'osx-universal');
   assert.match(macosDepot, /osx-universal/);
+});
+
+test('resolveSteamcmdAuthState reports first-run, reusable, and metadata-only SteamCMD roots', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'portable-version-steam-auth-state-'));
+  const firstRun = await createFakeSteamcmdRoot(path.join(tempRoot, 'first-run'));
+  const reusable = await createFakeSteamcmdRoot(path.join(tempRoot, 'reusable'), {
+    createSavedState: true
+  });
+  const metadataOnly = await createFakeSteamcmdRoot(path.join(tempRoot, 'metadata-only'));
+
+  await writeFile(path.join(metadataOnly.steamcmdRoot, 'config', 'loginusers.vdf'), '"users"', 'utf8');
+
+  const firstRunState = await resolveSteamcmdAuthState(firstRun.steamcmdPath);
+  const reusableState = await resolveSteamcmdAuthState(reusable.steamcmdPath);
+  const metadataOnlyState = await resolveSteamcmdAuthState(metadataOnly.steamcmdPath);
+
+  assert.equal(firstRunState.hasReusableLogin, false);
+  assert.deepEqual(firstRunState.detectedStatePaths, []);
+  assert.match(firstRunState.detectionReason, /no known SteamCMD authentication state files/i);
+
+  assert.equal(reusableState.hasReusableLogin, true);
+  assert.deepEqual(reusableState.detectedStatePaths, [
+    path.join(reusable.steamcmdRoot, 'config', 'config.vdf'),
+    path.join(reusable.steamcmdRoot, 'config', 'loginusers.vdf'),
+    path.join(reusable.steamcmdRoot, 'ssfn123456')
+  ]);
+  assert.match(reusableState.detectionReason, /config\/config\.vdf and Steam Guard state files/i);
+
+  assert.equal(metadataOnlyState.hasReusableLogin, false);
+  assert.deepEqual(metadataOnlyState.detectedStatePaths, [
+    path.join(metadataOnly.steamcmdRoot, 'config', 'loginusers.vdf')
+  ]);
+  assert.match(metadataOnlyState.detectionReason, /no reusable login token files/i);
+});
+
+test('publish-steam refreshes a saved SteamCMD login once when the first saved-login build fails', async () => {
+  const publication = await createLocalSteamPublicationFixture();
+  const fakeSteam = await createFakeSteamcmdRoot(publication.tempRoot, {
+    createSavedState: true
+  });
+
+  await runCommand(
+    'node',
+    [
+      path.join(repoRoot, 'scripts', 'publish-steam.mjs'),
+      '--plan',
+      publication.planPath,
+      '--content-root',
+      publication.contentRoot,
+      '--output-dir',
+      publication.outputDir,
+      '--app-id',
+      '7654321',
+      '--linux-depot-id',
+      '7654322',
+      '--windows-depot-id',
+      '7654323'
+    ],
+    {
+      env: {
+        ...process.env,
+        STEAMCMD_PATH: fakeSteam.steamcmdPath,
+        STEAM_USERNAME: 'builder-account',
+        STEAM_PASSWORD: 'builder-secret',
+        FAKE_STEAM_LOG_PATH: fakeSteam.logPath,
+        FAKE_STEAM_STATE_PATH: fakeSteam.statePath,
+        FAKE_STEAM_FAIL_SAVED_LOGIN_COUNT: '1'
+      }
+    }
+  );
+
+  const manifest = await readJson(path.join(publication.outputDir, 'steam-build-manifest.json'));
+  const invocations = await readFakeSteamLog(fakeSteam.logPath);
+
+  assert.equal(manifest.steamAuthentication.initialMode, 'saved-login');
+  assert.equal(manifest.steamAuthentication.finalMode, 'refreshed-saved-login');
+  assert.equal(manifest.steamAuthentication.fallbackTriggered, true);
+  assert.equal(manifest.steamAuthentication.failureStage, null);
+  assert.equal(invocations.length, 3);
+  assert.equal(invocations[0].hasSavedLogin, true);
+  assert.equal(invocations[0].appBuildPath.endsWith('app-build.vdf'), true);
+  assert.equal(invocations[1].hasCredentialedLogin, true);
+  assert.equal(invocations[1].isBootstrap, true);
+  assert.equal(invocations[2].hasSavedLogin, true);
+});
+
+test('publish-steam reports saved-login refresh failures when no Steam password is available', async () => {
+  const publication = await createLocalSteamPublicationFixture();
+  const fakeSteam = await createFakeSteamcmdRoot(publication.tempRoot, {
+    createSavedState: true
+  });
+
+  await assert.rejects(
+    () =>
+      runCommand(
+        'node',
+        [
+          path.join(repoRoot, 'scripts', 'publish-steam.mjs'),
+          '--plan',
+          publication.planPath,
+          '--content-root',
+          publication.contentRoot,
+          '--output-dir',
+          publication.outputDir,
+          '--app-id',
+          '7654321',
+          '--linux-depot-id',
+          '7654322',
+          '--windows-depot-id',
+          '7654323'
+        ],
+        {
+          env: {
+            ...process.env,
+            STEAMCMD_PATH: fakeSteam.steamcmdPath,
+            STEAM_USERNAME: 'builder-account',
+            FAKE_STEAM_LOG_PATH: fakeSteam.logPath,
+            FAKE_STEAM_STATE_PATH: fakeSteam.statePath,
+            FAKE_STEAM_FAIL_SAVED_LOGIN_COUNT: '1'
+          },
+          stdio: 'pipe'
+        }
+      ),
+    /STEAM_PASSWORD is unavailable for a refresh/
+  );
+
+  const manifest = await readJson(path.join(publication.outputDir, 'steam-build-manifest.json'));
+  const invocations = await readFakeSteamLog(fakeSteam.logPath);
+
+  assert.equal(manifest.steamAuthentication.initialMode, 'saved-login');
+  assert.equal(manifest.steamAuthentication.finalMode, 'saved-login');
+  assert.equal(manifest.steamAuthentication.fallbackTriggered, false);
+  assert.equal(manifest.steamAuthentication.failureStage, 'saved-login');
+  assert.equal(invocations.length, 1);
+  assert.equal(invocations[0].hasSavedLogin, true);
+});
+
+test('publish-steam preserves reusable auth diagnostics after moving the SteamCMD root and writes summary context', async () => {
+  const publication = await createLocalSteamPublicationFixture();
+  const initialSteam = await createFakeSteamcmdRoot(publication.tempRoot, {
+    createSavedState: true
+  });
+  const relocatedRoot = path.join(publication.tempRoot, 'runner-cache', 'steamcmd-relocated');
+  const summaryPath = path.join(publication.tempRoot, 'github-step-summary.md');
+
+  await mkdir(path.dirname(relocatedRoot), { recursive: true });
+  await rename(initialSteam.steamcmdRoot, relocatedRoot);
+
+  const relocatedSteamcmdPath = path.join(relocatedRoot, 'steamcmd.sh');
+
+  await runCommand(
+    'node',
+    [
+      path.join(repoRoot, 'scripts', 'publish-steam.mjs'),
+      '--plan',
+      publication.planPath,
+      '--content-root',
+      publication.contentRoot,
+      '--output-dir',
+      publication.outputDir,
+      '--app-id',
+      '7654321',
+      '--linux-depot-id',
+      '7654322',
+      '--windows-depot-id',
+      '7654323'
+    ],
+    {
+      env: {
+        ...process.env,
+        STEAMCMD_PATH: relocatedSteamcmdPath,
+        STEAM_USERNAME: 'builder-account',
+        GITHUB_STEP_SUMMARY: summaryPath,
+        FAKE_STEAM_LOG_PATH: initialSteam.logPath,
+        FAKE_STEAM_STATE_PATH: initialSteam.statePath
+      }
+    }
+  );
+
+  const manifest = await readJson(path.join(publication.outputDir, 'steam-build-manifest.json'));
+  const summary = await readFile(summaryPath, 'utf8');
+  const invocations = await readFakeSteamLog(initialSteam.logPath);
+
+  assert.equal(manifest.steamAuthentication.steamcmdRoot, relocatedRoot);
+  assert.equal(manifest.steamAuthentication.canonicalConfigPath, path.join(relocatedRoot, 'config', 'config.vdf'));
+  assert.equal(manifest.steamAuthentication.hasReusableLogin, true);
+  assert.deepEqual(manifest.steamAuthentication.detectedStatePaths, [
+    path.join(relocatedRoot, 'config', 'config.vdf'),
+    path.join(relocatedRoot, 'config', 'loginusers.vdf'),
+    path.join(relocatedRoot, 'ssfn123456')
+  ]);
+  assert.equal(manifest.steamAuthentication.initialMode, 'saved-login');
+  assert.equal(manifest.steamAuthentication.finalMode, 'saved-login');
+  assert.equal(manifest.steamAuthentication.fallbackTriggered, false);
+  assert.equal(manifest.steamAuthentication.failureStage, null);
+  assert.match(summary, /## Portable Version Steam publication complete/);
+  assert.match(summary, new RegExp(`SteamCMD root: ${relocatedRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(summary, /Steam auth final mode: saved-login/);
+  assert.match(summary, /Steam auth state files:/);
+  assert.equal(invocations.length, 1);
+  assert.equal(invocations[0].hasSavedLogin, true);
 });
 
 test('generateSteamGuardCode returns the expected length', () => {
