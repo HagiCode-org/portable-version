@@ -105,16 +105,9 @@ jobs:
         if: always()
         shell: bash
         run: |
-          {
-            echo "## SteamCMD persistence"
-            echo "- Root: ${STEAMCMD_ROOT}"
-            echo "- Config: ${STEAMCMD_ROOT}/config/config.vdf"
-            if [ -f "${STEAMCMD_ROOT}/config/config.vdf" ]; then
-              echo "- Saved login token: present"
-            else
-              echo "- Saved login token: missing"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          node scripts/summarize-steam-auth.mjs \
+            --manifest "$RUNNER_TEMP/portable-steam-dlc-build/steam-build-manifest.json" \
+            --steamcmd-root "$STEAMCMD_ROOT"
 
       - name: Upload Steam DLC build metadata
         uses: actions/upload-artifact@v6
