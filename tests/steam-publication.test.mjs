@@ -265,6 +265,9 @@ async function addPortableReleaseToFixture(
   await writeFile(path.join(linuxSource, 'hagicode'), platformContents.linux, 'utf8');
   await writeFile(path.join(windowsSource, 'hagicode.exe'), platformContents.windows, 'utf8');
   await writeFile(path.join(macSource, 'Hagicode Desktop.app'), platformContents.macos, 'utf8');
+  await addDesktopToolchainFixture(linuxSource, 'linux-x64');
+  await addDesktopToolchainFixture(windowsSource, 'win-x64');
+  await addDesktopToolchainFixture(macSource, 'osx-universal');
 
   await writeJson(buildManifestPath, {
     upstream: {
@@ -316,6 +319,43 @@ async function addPortableReleaseToFixture(
     releaseTag,
     steamDepotIds,
     artifacts
+  });
+}
+
+async function addDesktopToolchainFixture(sourceRoot, platformId) {
+  const portableFixedSegments = platformId === 'osx-universal'
+    ? ['Contents', 'Resources', 'extra', 'portable-fixed']
+    : ['resources', 'extra', 'portable-fixed'];
+  const toolchainRoot = path.join(sourceRoot, ...portableFixedSegments, 'toolchain');
+  const isWindows = platformId === 'win-x64';
+  const nodeRelativePath = isWindows ? path.join('node', 'node.exe') : path.join('node', 'bin', 'node');
+  const npmRelativePath = isWindows ? path.join('node', 'npm.cmd') : path.join('node', 'bin', 'npm');
+  const extension = isWindows ? '.cmd' : '';
+  const commands = {
+    node: nodeRelativePath,
+    npm: npmRelativePath,
+    openspec: path.join('bin', `openspec${extension}`),
+    skills: path.join('bin', `skills${extension}`),
+    omniroute: path.join('bin', `omniroute${extension}`)
+  };
+
+  for (const relativePath of Object.values(commands)) {
+    const targetPath = path.join(toolchainRoot, relativePath);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, path.basename(relativePath), 'utf8');
+  }
+
+  await writeJson(path.join(toolchainRoot, 'toolchain-manifest.json'), {
+    owner: 'hagicode-desktop',
+    source: 'bundled-desktop',
+    platform: platformId === 'osx-universal' ? 'osx-x64' : platformId,
+    node: { version: '22.22.2' },
+    commands,
+    packages: {
+      openspec: { packageName: '@fission-ai/openspec', version: '1.3.1' },
+      skills: { packageName: 'skills', version: '1.5.1' },
+      omniroute: { packageName: 'omniroute', version: '3.6.9' }
+    }
   });
 }
 

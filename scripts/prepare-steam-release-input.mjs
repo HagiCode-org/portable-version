@@ -12,6 +12,7 @@ import {
 } from './lib/azure-blob.mjs';
 import { cleanDir, readJson, writeJson } from './lib/fs-utils.mjs';
 import { annotateError, appendSummary } from './lib/summary.mjs';
+import { validateDesktopToolchainContract } from './lib/desktop-toolchain-contract.mjs';
 
 const REQUIRED_ARCHIVE_PLATFORMS = [
   { platform: 'linux-x64', metadataKey: 'linux' },
@@ -184,6 +185,28 @@ export async function prepareSteamReleaseInput({
     await extractArchive(downloadedArchivePath, platformContentRoot);
   }
 
+  const toolchainValidation = [];
+  for (const asset of hydrationAssets) {
+    const platformContentRoot = path.join(contentRoot, asset.platform);
+    const validation = await validateDesktopToolchainContract({
+      platformContentRoot,
+      platformId: asset.platform,
+    });
+    toolchainValidation.push({
+      platform: asset.platform,
+      ...validation,
+    });
+  }
+
+  const invalidToolchains = toolchainValidation.filter((validation) => !validation.valid);
+  if (invalidToolchains.length > 0) {
+    throw new Error(
+      `Release ${resolvedReleaseTag} contains incomplete Desktop-authored toolchain payloads: ${invalidToolchains
+        .map((validation) => `${validation.platform}: ${validation.errors.join('; ')}`)
+        .join(' | ')}`
+    );
+  }
+
   const result = {
     releaseTag: resolvedReleaseTag,
     requestedReleaseTag,
@@ -199,6 +222,7 @@ export async function prepareSteamReleaseInput({
     },
     metadata: releaseEntry.metadata,
     preparedPlatforms: hydrationAssets.map((asset) => asset.platform),
+    toolchainValidation,
     downloadedAssets: hydrationAssets.map((asset) => ({
       platform: asset.platform,
       fileName: asset.fileName,
@@ -217,6 +241,7 @@ export async function prepareSteamReleaseInput({
     `- Azure version entry: ${result.azureIndex.version}`,
     `- Depot platforms: ${Object.keys(result.steamDepotIds).join(', ')}`,
     `- Prepared platforms: ${result.preparedPlatforms.join(', ')}`,
+    `- Desktop toolchain contracts: ${toolchainValidation.map((item) => `${item.platform}=valid`).join(', ')}`,
     `- Build manifest: ${buildManifestPath}`,
     `- Artifact inventory: ${artifactInventoryPath}`,
     `- Checksums: ${checksumsPath}`,
