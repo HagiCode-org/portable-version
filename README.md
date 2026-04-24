@@ -202,7 +202,8 @@ The automation currently assumes:
 - Server assets follow the framework-dependent naming contract used by HagiCode releases, for example `hagicode-0.1.0-beta.35-linux-x64-nort.zip`.
 - the selected Server asset extracts to a structure that contains `manifest.json`, `config/`, `lib/PCode.Web.dll`, `lib/PCode.Web.runtimeconfig.json`, and `lib/PCode.Web.deps.json`.
 - the downloaded Desktop asset already contains `resources/extra/portable-fixed/` or `Contents/Resources/extra/portable-fixed/`, and the workflow injects the runtime into `current/` inside that directory.
-- delegated packaging in `steam_packer` pins the portable toolchain per platform and stages it under `portable-fixed/toolchain/`, including `node/`, `npm-global/`, `bin/openspec`, `bin/opsx`, `env/activate.*`, and `toolchain-manifest.json`.
+- Node/toolchain ownership belongs to `hagicode-desktop`. New Desktop assets must already contain the canonical `portable-fixed/toolchain/` contract with `node/`, `npm-global/`, `bin/openspec`, `bin/skills`, `bin/omniroute`, `env/activate.*`, and a Desktop-authored `toolchain-manifest.json` marked `owner=hagicode-desktop` and `source=bundled-desktop`.
+- `portable-version` validates and consumes that Desktop-authored contract only. It no longer defines Node versions, downloads Node archives, or preinstalls CLI packages. Old payloads that only expose legacy entries such as `bin/opsx` are detected as legacy incomplete payloads and fail the new release path instead of silently passing.
 
 ## Steam publication flow
 
