@@ -203,7 +203,8 @@ The automation currently assumes:
 - the selected Server asset extracts to a structure that contains `manifest.json`, `config/`, `lib/PCode.Web.dll`, `lib/PCode.Web.runtimeconfig.json`, and `lib/PCode.Web.deps.json`.
 - the downloaded Desktop asset already contains `resources/extra/portable-fixed/` or `Contents/Resources/extra/portable-fixed/`, and the workflow injects the runtime into `current/` inside that directory.
 - Node/toolchain ownership belongs to `hagicode-desktop`. New Desktop assets must already contain the canonical `portable-fixed/toolchain/` contract with `node/`, `npm-global/`, `bin/openspec`, `bin/skills`, `bin/omniroute`, `env/activate.*`, and a Desktop-authored `toolchain-manifest.json` marked `owner=hagicode-desktop` and `source=bundled-desktop`.
-- `portable-version` validates and consumes that Desktop-authored contract only. It no longer defines Node versions, downloads Node archives, or preinstalls CLI packages. Old payloads that only expose legacy entries such as `bin/opsx` are detected as legacy incomplete payloads and fail the new release path instead of silently passing.
+- `repos/steam_packer` performs the authoritative pre-publication validation for that Desktop-authored contract, including bundled managed CLI entries such as `openspec`, `skills`, and `omniroute`.
+- `portable-version` trusts the Azure-published archives that already passed that upstream gate and limits Steam hydration checks to release metadata, required archives, and extraction compatibility.
 
 ## Steam publication flow
 
@@ -300,5 +301,5 @@ Each successful build publishes:
 - merged artifact inventory metadata
 - merged SHA-256 checksums
 - one root-index entry containing `metadata.*`, `steamDepotIds.*`, and `artifacts[]`
-- one toolchain validation report per platform, proving the bundled `node`, `openspec`, and `opsx` commands executed successfully before publication
+- one upstream toolchain validation report per platform, emitted by `steam_packer` before publication
 For DLC publication, no repository-level app id secret is used. Each DLC latest version must provide its own `steamAppId` in the DLC root `index.json`.
